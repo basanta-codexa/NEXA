@@ -39,7 +39,7 @@ def create_agent(agent: CreateAgent, db=Depends(get_db), tenant_id: int = Depend
 
 
 @router.get("")
-def get_agents(db=Depends(get_db), tenant_id: int = Depends(get_current_tenant_id), current_user = Depends(require_permission(Permissions.AGENT_READ))):
+def get_agents(db=Depends(get_db), tenant_id: int = Depends(get_current_tenant_id), current_user=Depends(require_permission(Permissions.AGENT_READ))):
 
     agents = get_all_agents_service(db, tenant_id)
 
@@ -61,7 +61,7 @@ def get_agents(db=Depends(get_db), tenant_id: int = Depends(get_current_tenant_i
 def get_agent(
     agent_id: int,
     db=Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id), current_user = Depends(require_permission(Permissions.AGENT_READ))
+    tenant_id: int = Depends(get_current_tenant_id), current_user=Depends(require_permission(Permissions.AGENT_READ))
 ):
 
     existing_agent = get_agent_service(db, agent_id, tenant_id)
@@ -131,9 +131,6 @@ def delete_agent(
             status_code=404,
             detail="Agent not found"
         )
-
-    db.delete(existing_agent)
-    db.commit()
 
     return {
         "message": "Agent deleted successfully!"
