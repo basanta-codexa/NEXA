@@ -107,6 +107,7 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(100))
     language: Mapped[str] = mapped_column(String(50))
+    description:Mapped[str | None] = mapped_column(String(1000), nullable=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey(
         "tenants.id"), nullable=False)  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="agents")

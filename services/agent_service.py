@@ -5,6 +5,7 @@ def create_agent_service(db, agent_data, tenant_id):
         name=agent_data.name,
         role=agent_data.role,
         language=agent_data.language,
+        description= agent_data.description,
         tenant_id=tenant_id
     )
     db.add(new_agent)
@@ -39,6 +40,7 @@ def update_agent_service(db, agent_id, agent_data, tenant_id):
     agent.name = agent_data.name
     agent.role = agent_data.role
     agent.language = agent_data.language
+    agent.description = agent_data.description
 
     db.commit()
     db.refresh(agent)
