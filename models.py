@@ -1,8 +1,66 @@
 from sqlalchemy.orm import declarative_base, sessionmaker, mapped_column, Mapped, relationship
 
-from sqlalchemy import String, ForeignKey
+from sqlalchemy import String, ForeignKey, Table, Column
 
 Base = declarative_base()
+
+role_permissions = Table(
+    "role_permissions",
+    Base.metadata,
+    Column(
+        "role_id",
+        ForeignKey("roles.id"),
+        primary_key=True
+    ),
+    Column(
+        "permission_id",
+        ForeignKey("permissions.id"),
+        primary_key=True
+    )
+)
+class Permission(Base):
+    __tablename__ = "permissions"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    name: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False
+    )
+
+    description: Mapped[str | None] = mapped_column(
+        String(255),
+        nullable=True
+    )
+    roles: Mapped[list["Role"]] = relationship(
+        secondary=role_permissions,
+        back_populates="permissions"
+    )
+
+
+class Role(Base):
+    __tablename__ = "roles"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    name: Mapped[str] = mapped_column(
+        String(100),
+        nullable=False
+    )
+
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False
+    )
+
+    tenant: Mapped["Tenant"] = relationship(
+        back_populates="roles"
+    )
+    permissions: Mapped[list["Permission"]] = relationship(
+        secondary=role_permissions,
+        back_populates="roles"
+    )
 
 
 class Tenant(Base):
@@ -14,6 +72,10 @@ class Tenant(Base):
 
     agents: Mapped[list["Agent"]] = relationship(back_populates="tenant")
     users: Mapped[list["User"]] = relationship(back_populates="tenant")
+
+    roles: Mapped[list["Role"]] = relationship(
+        back_populates="tenant"
+    )
 
 
 class User(Base):
@@ -29,6 +91,10 @@ class User(Base):
         nullable=False,
         default="member"
     )
+    role_id:Mapped[int | None] = mapped_column(
+        ForeignKey("roles.id"), nullable=True
+    )
+    role_obj: Mapped["Role | None"] = relationship()
     tenant_id: Mapped[int] = mapped_column(ForeignKey(
         "tenants.id"), nullable=False)  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="users")

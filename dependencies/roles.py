@@ -1,28 +1,8 @@
 from fastapi import Depends, HTTPException
 from dependencies.auth import get_current_user
 
-from dependencies.permissions import Permissions
-
-# permission of each role
-ROLE_PERMISSIONS = {
-    "admin": {
-        Permissions.AGENT_READ,
-        Permissions.AGENT_CREATE,
-        Permissions.AGENT_DELETE,
-        Permissions.AGENT_UPDATE,
-        Permissions.USER_READ,
-        Permissions.USER_CREATE,
-    },
-    "manager": {
-        Permissions.AGENT_READ,
-        Permissions.AGENT_CREATE,
-        Permissions.AGENT_UPDATE,
-    },
-
-    "member": {
-        Permissions.AGENT_READ,
-    },
-}
+from database import get_db
+from models import Role
 
 
 def require_roles(*allowed_roles):
@@ -39,18 +19,38 @@ def require_roles(*allowed_roles):
 
 
 def require_permission(required_permission: str):
-    def permission_checker(current_user=Depends(get_current_user)):
+    def permission_checker(current_user=Depends(get_current_user), db=Depends(get_db)):
 
-        user_permissions = ROLE_PERMISSIONS.get(
-            current_user.role,
-            set()
-        )
+        # check wheather the user has a role assigned or not
+        if current_user.role_id is None:
+            raise HTTPException(
+                status_code=403,
+                detail="No role assigned to this user."
+            )
+        # fetch permission assigned to the user's role
 
-        if required_permission not in user_permissions:
+        role = db.query(Role).filter(Role.id == current_user.role_id,
+                                     Role.tenant_id == current_user.tenant_id,).first()
+
+        if role is None:
+            raise HTTPException(
+                status_code=403,
+                detail="Role not found for this user."
+            )
+        # 3. Get permission names from the user role.
+        permission_names = {
+            permission.name
+            for permission in role.permissions
+        }
+
+        # 4. Check whether the required permission exists.
+        if required_permission not in permission_names:
             raise HTTPException(
                 status_code=403,
                 detail="You do not have permission to perform this action."
             )
+
+        # 5. Allow the request to continue.
 
         return current_user
 
