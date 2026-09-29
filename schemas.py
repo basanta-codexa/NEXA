@@ -1,5 +1,5 @@
 from pydantic import BaseModel, ConfigDict
-
+from models import AgentStatus
 
 class CreateAgent(BaseModel):
     name: str
@@ -14,6 +14,8 @@ class UpdateAgent(BaseModel):
     language: str
     description: str | None = None
 
+class UpdateAgentStatus(BaseModel):
+    status : AgentStatus
 
 class AgentResponse(BaseModel):
     id: int
@@ -21,6 +23,7 @@ class AgentResponse(BaseModel):
     role: str
     language: str
     description: str | None = None
+    status: AgentStatus
     tenant_id: int
 
     model_config= ConfigDict(from_attributes=True)

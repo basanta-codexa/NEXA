@@ -1,11 +1,12 @@
-from models import Agent
+from models import Agent, AgentStatus
+
 
 def create_agent_service(db, agent_data, tenant_id):
     new_agent = Agent(
         name=agent_data.name,
         role=agent_data.role,
         language=agent_data.language,
-        description= agent_data.description,
+        description=agent_data.description,
         tenant_id=tenant_id
     )
     db.add(new_agent)
@@ -16,9 +17,11 @@ def create_agent_service(db, agent_data, tenant_id):
 
     return new_agent
 
+
 def get_all_agents_service(db, tenant_id):
     agents = db.query(Agent).filter(Agent.tenant_id == tenant_id).all()
     return agents
+
 
 def get_agent_service(db, agent_id, tenant_id):
     agent = db.query(Agent).filter(
@@ -27,6 +30,7 @@ def get_agent_service(db, agent_id, tenant_id):
     ).first()
 
     return agent
+
 
 def update_agent_service(db, agent_id, agent_data, tenant_id):
     agent = db.query(Agent).filter(
@@ -46,6 +50,51 @@ def update_agent_service(db, agent_id, agent_data, tenant_id):
     db.refresh(agent)
 
     return agent
+
+
+def is_valid_status_transition(
+    current_status: AgentStatus,
+    new_status: AgentStatus
+) -> bool:
+
+    allowed_transitions = {
+        AgentStatus.DRAFT: {
+            AgentStatus.ACTIVE
+        },
+
+        AgentStatus.ACTIVE: {
+            AgentStatus.PAUSED,
+            AgentStatus.ARCHIVED
+        },
+
+        AgentStatus.PAUSED: {
+            AgentStatus.ACTIVE,
+            AgentStatus.ARCHIVED
+        },
+
+        AgentStatus.ARCHIVED: set()
+    }
+
+    return new_status in allowed_transitions[current_status]
+
+
+def update_agent_status_service(db, agent_id,  status, tenant_id):
+    agent = db.query(Agent).filter(Agent.id == agent_id,
+                                   Agent.tenant_id == tenant_id).first()
+
+    if agent is None:
+        return None
+
+    if not is_valid_status_transition(agent.status, status):
+        return "Invalid_transition"
+
+    agent.status = status
+
+    db.commit()
+    db.refresh(agent)
+
+    return agent
+
 
 def delete_agent_service(db, agent_id, tenant_id):
     agent = db.query(Agent).filter(

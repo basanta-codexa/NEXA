@@ -2,7 +2,6 @@ from fastapi import FastAPI, Depends
 from routers.agents import router as agents_router
 from routers.tenants import router as tenants_router
 
-from dependencies.tenant import get_current_tenant_id
 from routers.users import router as users_router
 
 app = FastAPI()

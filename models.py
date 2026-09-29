@@ -1,6 +1,7 @@
-from sqlalchemy.orm import declarative_base, sessionmaker, mapped_column, Mapped, relationship
+from sqlalchemy.orm import declarative_base, mapped_column, Mapped, relationship
 
-from sqlalchemy import String, ForeignKey, Table, Column
+from sqlalchemy import String, ForeignKey, Table, Column, Enum
+from enum import Enum as PyEnum
 
 Base = declarative_base()
 
@@ -18,6 +19,8 @@ role_permissions = Table(
         primary_key=True
     )
 )
+
+
 class Permission(Base):
     __tablename__ = "permissions"
 
@@ -91,13 +94,20 @@ class User(Base):
         nullable=False,
         default="member"
     )
-    role_id:Mapped[int | None] = mapped_column(
+    role_id: Mapped[int | None] = mapped_column(
         ForeignKey("roles.id"), nullable=True
     )
     role_obj: Mapped["Role | None"] = relationship()
     tenant_id: Mapped[int] = mapped_column(ForeignKey(
         "tenants.id"), nullable=False)  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
+
+
+class AgentStatus(str, PyEnum):
+    DRAFT = "draft"
+    ACTIVE = "active"
+    PAUSED = "paused"
+    ARCHIVED = "archived"
 
 
 class Agent(Base):
@@ -107,7 +117,14 @@ class Agent(Base):
     name: Mapped[str] = mapped_column(String(100))
     role: Mapped[str] = mapped_column(String(100))
     language: Mapped[str] = mapped_column(String(50))
-    description:Mapped[str | None] = mapped_column(String(1000), nullable=True)
+    description: Mapped[str | None] = mapped_column(
+        String(1000), nullable=True)
+    status: Mapped[AgentStatus] = mapped_column(
+        Enum(AgentStatus),
+        default=AgentStatus.DRAFT,
+        nullable=False
+    )
+
     tenant_id: Mapped[int] = mapped_column(ForeignKey(
         "tenants.id"), nullable=False)  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="agents")

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from database import get_db
 from models import Agent
-from schemas import CreateAgent, UpdateAgent, AgentResponse, AgentListResponse
+from schemas import CreateAgent, UpdateAgent, AgentResponse, AgentListResponse, UpdateAgentStatus
 
 from dependencies.tenant import get_current_tenant_id
 
@@ -11,7 +11,7 @@ from dependencies.permissions import Permissions
 
 from services.agent_service import (
     create_agent_service, get_all_agents_service,
-    get_agent_service, update_agent_service,
+    get_agent_service, update_agent_service, update_agent_status_service,
     delete_agent_service
 )
 
@@ -29,7 +29,7 @@ def create_agent(agent: CreateAgent, db=Depends(get_db), tenant_id: int = Depend
     return new_agent
 
 
-@router.get("", response_description=AgentListResponse)
+@router.get("", response_model=AgentListResponse)
 def get_agents(db=Depends(get_db), tenant_id: int = Depends(get_current_tenant_id), current_user=Depends(require_permission(Permissions.AGENT_READ))):
 
     agents = get_all_agents_service(db, tenant_id)
@@ -75,7 +75,23 @@ def update_agent(
 
     return existing_agent
 
+@router.patch("/{agent_id}/status")
+def update_agent_status(agent_id:int, agent_status:UpdateAgentStatus, db = Depends(get_db), tenant_id:int = Depends(get_current_tenant_id), current_user = Depends(require_permission(Permissions.AGENT_UPDATE))):
 
+    updated_agent = update_agent_status_service(db, agent_id, agent_status.status, tenant_id)
+
+    if updated_agent is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found"
+        )
+    if updated_agent == "Invalid_transition":
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid agent status transition"
+        )
+
+    return updated_agent
 
 @router.delete("/{agent_id}")
 def delete_agent(
