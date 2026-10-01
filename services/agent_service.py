@@ -10,6 +10,8 @@ def create_agent_service(db, agent_data, tenant_id):
         system_prompt=agent_data.system_prompt,
         model_name=agent_data.model_name,
         temperature = agent_data.temperature,
+        max_tokens = agent_data.max_tokens,
+        top_p = agent_data.top_p,
         tenant_id=tenant_id
     )
     db.add(new_agent)
@@ -51,7 +53,9 @@ def update_agent_service(db, agent_id, agent_data, tenant_id):
     agent.system_prompt = agent_data.system_prompt
     agent.model_name = agent_data.model_name
     agent.temperature = agent_data.temperature
-    
+    agent.max_tokens = agent_data.max_tokens
+    agent.top_p = agent_data.top_p
+
     db.commit()
     db.refresh(agent)
 

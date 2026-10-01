@@ -119,9 +119,16 @@ class Agent(Base):
     language: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(
         String(1000), nullable=True)
+    # how predictable or creative the model's responses are
     temperature: Mapped[float | None] = mapped_column(
         nullable=True)
-    # how predictable or creative the model's responses are
+    max_tokens: Mapped[int | None] = mapped_column(
+        nullable=True 
+    )
+    # top_p controls how much of that probability distribution the model considers
+    top_p: Mapped[float | None] = mapped_column(
+        nullable=True
+    )
     system_prompt : Mapped[str | None] = mapped_column(String(4000), nullable=True)
     model_name: Mapped[str | None] = mapped_column(String(100),nullable=True)
     status: Mapped[AgentStatus] = mapped_column(
