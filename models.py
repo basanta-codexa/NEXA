@@ -119,6 +119,11 @@ class Agent(Base):
     language: Mapped[str] = mapped_column(String(50))
     description: Mapped[str | None] = mapped_column(
         String(1000), nullable=True)
+    temperature: Mapped[float | None] = mapped_column(
+        nullable=True)
+    # how predictable or creative the model's responses are
+    system_prompt : Mapped[str | None] = mapped_column(String(4000), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(100),nullable=True)
     status: Mapped[AgentStatus] = mapped_column(
         Enum(AgentStatus),
         default=AgentStatus.DRAFT,

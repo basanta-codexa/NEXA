@@ -6,6 +6,9 @@ class CreateAgent(BaseModel):
     role: str
     language: str
     description: str | None = None
+    system_prompt : str | None = None
+    model_name: str | None = None
+    temperature : float | None = None
 
 
 class UpdateAgent(BaseModel):
@@ -13,6 +16,9 @@ class UpdateAgent(BaseModel):
     role: str
     language: str
     description: str | None = None
+    system_prompt : str | None = None
+    model_name : str | None = None
+    temperature : float | None = None
 
 class UpdateAgentStatus(BaseModel):
     status : AgentStatus
@@ -23,6 +29,9 @@ class AgentResponse(BaseModel):
     role: str
     language: str
     description: str | None = None
+    system_prompt : str | None = None
+    model_name : str | None = None
+    temperature : float | None = None
     status: AgentStatus
     tenant_id: int
 
