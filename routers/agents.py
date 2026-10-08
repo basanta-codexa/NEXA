@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from database import get_db
 from models import Agent
-from schemas import CreateAgent, UpdateAgent, AgentResponse, AgentListResponse, UpdateAgentStatus
+from schemas import CreateAgent, UpdateAgent, AgentResponse, AgentListResponse, UpdateAgentStatus, AgentRunRequest
 
 from dependencies.tenant import get_current_tenant_id
 
@@ -12,8 +12,10 @@ from dependencies.permissions import Permissions
 from services.agent_service import (
     create_agent_service, get_all_agents_service,
     get_agent_service, update_agent_service, update_agent_status_service,
-    delete_agent_service
+    delete_agent_service, run_agent_engine_service
 )
+
+from engine.agent_engine import AgentEngine
 
 router = APIRouter(
     prefix="/agents",
@@ -112,3 +114,32 @@ def delete_agent(
     return {
         "message": "Agent deleted successfully!"
     }
+
+
+@router.post("/{agent_id}/run")
+def run_agent(
+    agent_id: int,
+    request: AgentRunRequest,
+    db=Depends(get_db),
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(
+        require_permission(Permissions.AGENT_READ)
+    )
+):
+    result = run_agent_engine_service(
+        db,
+        agent_id,
+        tenant_id, request.message
+    )
+
+    if result is None:
+        raise HTTPException(
+            status_code=404,
+            detail="Agent not found"
+        )
+    if "error" in result:
+        raise HTTPException(
+            status_code=400, detail=result["error"]
+        )
+
+    return result

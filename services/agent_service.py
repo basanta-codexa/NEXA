@@ -1,5 +1,8 @@
 from models import Agent, AgentStatus
+from engine.agent_engine import AgentEngine
+from schemas import AgentConfig
 
+from llm.factory import create_llm_client
 
 def create_agent_service(db, agent_data, tenant_id):
     new_agent = Agent(
@@ -119,3 +122,38 @@ def delete_agent_service(db, agent_id, tenant_id):
     db.commit()
 
     return agent
+
+
+def run_agent_engine_service(
+    db,
+    agent_id,
+    tenant_id, user_message
+):
+    agent = db.query(Agent).filter(
+        Agent.id == agent_id,
+        Agent.tenant_id == tenant_id
+    ).first()
+
+    if agent is None:
+        return None
+
+    config = AgentConfig(
+        model_name=agent.model_name,
+        temperature=agent.temperature,
+        max_tokens=agent.max_tokens,
+        top_p=agent.top_p,
+        system_prompt=agent.system_prompt
+    )
+    try:
+        llm_client = create_llm_client(agent.model_name)
+    except ValueError as e:
+        return {
+            "error" : str(e)
+        }
+    engine = AgentEngine(config, llm_client)
+    try:
+        return engine.run(user_message)
+    except RuntimeError as e:
+        return {
+            "error" : str(e)
+        }
