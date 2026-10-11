@@ -129,7 +129,10 @@ def run_agent(
     result = run_agent_engine_service(
         db,
         agent_id,
-        tenant_id, request.message
+        tenant_id,
+        request.message,
+        session_id=request.session_id,
+        user_id=current_user.id if current_user else None
     )
 
     if result is None:

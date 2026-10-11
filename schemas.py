@@ -25,6 +25,7 @@ class CreateAgent(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=50)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    tools: list[str] | None = None
 
 
 class UpdateAgent(BaseModel):
@@ -50,6 +51,7 @@ class UpdateAgent(BaseModel):
     temperature: float | None = Field(default=None, ge=0.0, le=2.0)
     max_tokens: int | None = Field(default=None, ge=50)
     top_p: float | None = Field(default=None, ge=0.0, le=1.0)
+    tools: list[str] | None = None
 
 
 class UpdateAgentStatus(BaseModel):
@@ -68,6 +70,7 @@ class AgentResponse(BaseModel):
     max_tokens: int | None = None
     top_p: float | None = None
     status: AgentStatus
+    tools: list[str] | None = None
     tenant_id: int
 
     model_config = ConfigDict(from_attributes=True)
@@ -98,6 +101,7 @@ class AgentConfig(BaseModel):
     max_tokens: int | None = None
     top_p: float | None = None
     system_prompt: str | None = None
+    tools: list[str] | None = None
 
 
 class AgentRunRequest(BaseModel):
@@ -106,3 +110,4 @@ class AgentRunRequest(BaseModel):
         max_length=5000,
         strip_whitespace=True
     )
+    session_id: str | None = None

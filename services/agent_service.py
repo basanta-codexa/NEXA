@@ -1,6 +1,12 @@
 from models import Agent, AgentStatus
 from engine.agent_engine import AgentEngine
 from schemas import AgentConfig
+from tools.default_registry import default_registry
+from services.memory_service import (
+    get_or_create_conversation,
+    add_message,
+    get_conversation_history
+)
 
 from llm.factory import create_llm_client
 
@@ -15,6 +21,7 @@ def create_agent_service(db, agent_data, tenant_id):
         temperature = agent_data.temperature,
         max_tokens = agent_data.max_tokens,
         top_p = agent_data.top_p,
+        tools = agent_data.tools or [],
         tenant_id=tenant_id
     )
     db.add(new_agent)
@@ -58,6 +65,8 @@ def update_agent_service(db, agent_id, agent_data, tenant_id):
     agent.temperature = agent_data.temperature
     agent.max_tokens = agent_data.max_tokens
     agent.top_p = agent_data.top_p
+    if agent_data.tools is not None:
+        agent.tools = agent_data.tools
 
     db.commit()
     db.refresh(agent)
@@ -127,7 +136,10 @@ def delete_agent_service(db, agent_id, tenant_id):
 def run_agent_engine_service(
     db,
     agent_id,
-    tenant_id, user_message
+    tenant_id,
+    user_message,
+    session_id: str | None = None,
+    user_id: int | None = None
 ):
     agent = db.query(Agent).filter(
         Agent.id == agent_id,
@@ -150,10 +162,55 @@ def run_agent_engine_service(
         return {
             "error" : str(e)
         }
-    engine = AgentEngine(config, llm_client)
+    allowed_tools = agent.tools or []
+    scoped_registry = default_registry.create_scoped_registry(allowed_tools)
+    engine = AgentEngine(config, llm_client, tool_registry=scoped_registry)
+
+    # 1. Retrieve past conversation history if session_id is provided
+    conversation = None
+    conversation_history = None
+    if session_id:
+        conversation = get_or_create_conversation(
+            db=db,
+            tenant_id=tenant_id,
+            agent_id=agent_id,
+            session_id=session_id,
+            user_id=user_id
+        )
+        conversation_history = get_conversation_history(
+            db=db,
+            conversation_id=conversation.id,
+            tenant_id=tenant_id,
+            limit=20
+        )
+        # Store user's incoming turn in database
+        add_message(
+            db=db,
+            conversation_id=conversation.id,
+            tenant_id=tenant_id,
+            role="user",
+            content=user_message
+        )
+
     try:
-        return engine.run(user_message)
+        result = engine.run(
+            user_message=user_message,
+            conversation_history=conversation_history
+        )
     except RuntimeError as e:
         return {
             "error" : str(e)
         }
+
+    # 2. Persist assistant's final response in database
+    if conversation and "response" in result:
+        add_message(
+            db=db,
+            conversation_id=conversation.id,
+            tenant_id=tenant_id,
+            role="assistant",
+            content=result["response"]
+        )
+        result["session_id"] = session_id
+
+    return result

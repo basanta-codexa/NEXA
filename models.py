@@ -1,6 +1,7 @@
+from datetime import datetime, timezone
 from sqlalchemy.orm import declarative_base, mapped_column, Mapped, relationship
 
-from sqlalchemy import String, ForeignKey, Table, Column, Enum
+from sqlalchemy import String, ForeignKey, Table, Column, Enum, JSON, DateTime, Text
 from enum import Enum as PyEnum
 
 Base = declarative_base()
@@ -79,6 +80,9 @@ class Tenant(Base):
     roles: Mapped[list["Role"]] = relationship(
         back_populates="tenant"
     )
+    conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="tenant"
+    )
 
 
 class User(Base):
@@ -136,7 +140,70 @@ class Agent(Base):
         default=AgentStatus.DRAFT,
         nullable=False
     )
+    tools: Mapped[list[str] | None] = mapped_column(
+        JSON,
+        nullable=True,
+        default=list
+    )
 
     tenant_id: Mapped[int] = mapped_column(ForeignKey(
         "tenants.id"), nullable=False)  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="agents")
+    conversations: Mapped[list["Conversation"]] = relationship(back_populates="agent")
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    session_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
+    title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    agent: Mapped["Agent"] = relationship(back_populates="conversations")
+    tenant: Mapped["Tenant"] = relationship(back_populates="conversations")
+    messages: Mapped[list["Message"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="Message.created_at"
+    )
+
+
+class Message(Base):
+    __tablename__ = "messages"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("conversations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+
+    role: Mapped[str] = mapped_column(String(50), nullable=False)  # "user", "assistant", "system", "tool"
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_calls: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    conversation: Mapped["Conversation"] = relationship(back_populates="messages")
