@@ -1,0 +1,1029 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>NEXA — Voice Agent Demo</title>
+  <meta name="description" content="Real-time voice AI agent powered by NEXA — LiveKit + Whisper + Piper TTS" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- LiveKit JS Client SDK -->
+  <script src="https://cdn.jsdelivr.net/npm/livekit-client@2/dist/livekit-client.umd.min.js"></script>
+
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:          #08090d;
+      --surface:     #0f111a;
+      --surface2:    #161929;
+      --border:      rgba(255,255,255,0.07);
+      --accent:      #7c6cf8;
+      --accent2:     #a78bfa;
+      --accent-glow: rgba(124,108,248,0.25);
+      --green:       #22d3a0;
+      --red:         #f87171;
+      --amber:       #fbbf24;
+      --text:        #e8eaf0;
+      --text-muted:  #6b7280;
+      --text-dim:    #374151;
+      --radius:      16px;
+      --radius-sm:   8px;
+      --transition:  0.2s cubic-bezier(0.4,0,0.2,1);
+    }
+
+    html, body {
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', system-ui, sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+      overflow-x: hidden;
+    }
+
+    /* ── Background Mesh ──────────────────────────────────── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background:
+        radial-gradient(ellipse 80% 60% at 20% -10%, rgba(124,108,248,0.12) 0%, transparent 60%),
+        radial-gradient(ellipse 60% 50% at 80% 110%, rgba(34,211,160,0.08) 0%, transparent 55%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    /* ── Layout ───────────────────────────────────────────── */
+    .app {
+      position: relative;
+      z-index: 1;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ── Header ───────────────────────────────────────────── */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 24px 0 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .logo-text {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      background: linear-gradient(90deg, #fff 60%, var(--accent2));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .logo-sub {
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-top: -2px;
+    }
+
+    .status-badge {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 6px 14px;
+      border-radius: 100px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      transition: var(--transition);
+    }
+
+    .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--text-dim);
+      transition: var(--transition);
+    }
+
+    .status-badge.connected .status-dot { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .status-badge.connected { color: var(--green); border-color: rgba(34,211,160,0.2); }
+    .status-badge.connecting .status-dot { background: var(--amber); animation: pulse-dot 1s infinite; }
+    .status-badge.connecting { color: var(--amber); }
+    .status-badge.error .status-dot { background: var(--red); }
+    .status-badge.error { color: var(--red); }
+
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+
+    /* ── Main Content ─────────────────────────────────────── */
+    main {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      padding: 28px 0;
+    }
+
+    /* ── Config Panel ─────────────────────────────────────── */
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 16px 20px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .panel-icon {
+      font-size: 16px;
+      opacity: 0.8;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .panel-body {
+      padding: 20px;
+    }
+
+    /* ── Form ─────────────────────────────────────────────── */
+    .form-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+
+    @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field.full { grid-column: 1 / -1; }
+
+    label {
+      font-size: 12px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+    }
+
+    input, select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      transition: var(--transition);
+      appearance: none;
+    }
+
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    input::placeholder { color: var(--text-dim); }
+
+    select option {
+      background: var(--surface2);
+    }
+
+    /* ── Orb (Voice Visualizer) ───────────────────────────── */
+    .orb-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 28px;
+      padding: 40px 20px;
+    }
+
+    .orb-wrapper {
+      position: relative;
+      width: 160px;
+      height: 160px;
+    }
+
+    .orb-ring {
+      position: absolute;
+      inset: -20px;
+      border-radius: 50%;
+      border: 1px solid rgba(124,108,248,0.15);
+      animation: ring-expand 3s ease-in-out infinite;
+      opacity: 0;
+    }
+
+    .orb-ring:nth-child(2) { animation-delay: 1s; inset: -36px; }
+    .orb-ring:nth-child(3) { animation-delay: 2s; inset: -52px; }
+
+    @keyframes ring-expand {
+      0%   { opacity: 0; transform: scale(0.85); }
+      30%  { opacity: 0.6; }
+      100% { opacity: 0; transform: scale(1.1); }
+    }
+
+    .orb {
+      position: absolute;
+      inset: 0;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #a78bfa, #7c6cf8 50%, #4f35cc);
+      box-shadow:
+        0 0 40px rgba(124,108,248,0.3),
+        0 0 80px rgba(124,108,248,0.1),
+        inset 0 1px 0 rgba(255,255,255,0.2);
+      cursor: pointer;
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .orb:hover { transform: scale(1.05); box-shadow: 0 0 60px rgba(124,108,248,0.45), 0 0 120px rgba(124,108,248,0.15), inset 0 1px 0 rgba(255,255,255,0.2); }
+    .orb:active { transform: scale(0.97); }
+
+    .orb-icon {
+      font-size: 42px;
+      filter: drop-shadow(0 2px 8px rgba(0,0,0,0.4));
+      transition: var(--transition);
+    }
+
+    /* Speaking state */
+    .orb.speaking {
+      animation: orb-pulse 0.6s ease-in-out infinite alternate;
+      box-shadow:
+        0 0 60px rgba(34,211,160,0.4),
+        0 0 120px rgba(34,211,160,0.15),
+        inset 0 1px 0 rgba(255,255,255,0.2);
+      background: radial-gradient(circle at 35% 35%, #6ee7b7, #22d3a0 50%, #059669);
+    }
+
+    @keyframes orb-pulse {
+      from { transform: scale(1); }
+      to   { transform: scale(1.08); }
+    }
+
+    /* Listening state */
+    .orb.listening {
+      animation: orb-breathe 2s ease-in-out infinite;
+    }
+
+    @keyframes orb-breathe {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 40px rgba(124,108,248,0.3), 0 0 80px rgba(124,108,248,0.1), inset 0 1px 0 rgba(255,255,255,0.2); }
+      50%       { transform: scale(1.03); box-shadow: 0 0 60px rgba(124,108,248,0.5), 0 0 100px rgba(124,108,248,0.2), inset 0 1px 0 rgba(255,255,255,0.2); }
+    }
+
+    /* Waveform bars (shown when listening) */
+    .waveform {
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      height: 32px;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+
+    .waveform.active { opacity: 1; }
+
+    .wave-bar {
+      width: 3px;
+      height: 8px;
+      background: var(--accent2);
+      border-radius: 2px;
+      animation: wave-anim 0.8s ease-in-out infinite alternate;
+    }
+
+    .wave-bar:nth-child(1)  { animation-delay: 0.0s; }
+    .wave-bar:nth-child(2)  { animation-delay: 0.1s; }
+    .wave-bar:nth-child(3)  { animation-delay: 0.2s; }
+    .wave-bar:nth-child(4)  { animation-delay: 0.3s; }
+    .wave-bar:nth-child(5)  { animation-delay: 0.15s; }
+    .wave-bar:nth-child(6)  { animation-delay: 0.25s; }
+    .wave-bar:nth-child(7)  { animation-delay: 0.05s; }
+
+    @keyframes wave-anim {
+      from { height: 4px; opacity: 0.4; }
+      to   { height: 28px; opacity: 1; }
+    }
+
+    .orb-label {
+      font-size: 13px;
+      font-weight: 500;
+      color: var(--text-muted);
+      letter-spacing: 0.04em;
+      text-align: center;
+      min-height: 20px;
+      transition: var(--transition);
+    }
+
+    /* ── Transcript Panel ─────────────────────────────────── */
+    .transcript {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 320px;
+      overflow-y: auto;
+      padding: 4px 0;
+      scroll-behavior: smooth;
+    }
+
+    .transcript::-webkit-scrollbar { width: 4px; }
+    .transcript::-webkit-scrollbar-track { background: transparent; }
+    .transcript::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+    .message {
+      display: flex;
+      gap: 12px;
+      animation: msg-in 0.25s ease-out;
+    }
+
+    @keyframes msg-in {
+      from { opacity: 0; transform: translateY(6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .message.user { flex-direction: row-reverse; }
+
+    .msg-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      flex-shrink: 0;
+    }
+
+    .message.user .msg-avatar   { background: linear-gradient(135deg, var(--accent), var(--accent2)); }
+    .message.agent .msg-avatar  { background: linear-gradient(135deg, #22d3a0, #059669); }
+
+    .msg-bubble {
+      max-width: 70%;
+      padding: 10px 14px;
+      border-radius: 14px;
+      font-size: 14px;
+      line-height: 1.55;
+    }
+
+    .message.user .msg-bubble {
+      background: linear-gradient(135deg, rgba(124,108,248,0.25), rgba(167,139,250,0.15));
+      border: 1px solid rgba(124,108,248,0.2);
+      border-top-right-radius: 4px;
+      color: #d4d0ff;
+    }
+
+    .message.agent .msg-bubble {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-top-left-radius: 4px;
+      color: var(--text);
+    }
+
+    .msg-meta {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+
+    .message.user .msg-meta { justify-content: flex-end; }
+
+    .empty-state {
+      text-align: center;
+      padding: 32px;
+      color: var(--text-dim);
+      font-size: 13px;
+    }
+
+    .empty-state-icon { font-size: 32px; margin-bottom: 10px; opacity: 0.4; }
+
+    /* ── Action Buttons ───────────────────────────────────── */
+    .actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 13px 20px;
+      border: none;
+      border-radius: var(--radius-sm);
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .btn::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0);
+      transition: var(--transition);
+    }
+
+    .btn:hover::after { background: rgba(255,255,255,0.06); }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn:disabled::after { display: none; }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent) 0%, #6057e8 100%);
+      color: #fff;
+      box-shadow: 0 4px 20px rgba(124,108,248,0.35);
+    }
+
+    .btn-primary:hover:not(:disabled) { box-shadow: 0 6px 28px rgba(124,108,248,0.5); }
+
+    .btn-danger {
+      background: rgba(248,113,113,0.12);
+      color: var(--red);
+      border: 1px solid rgba(248,113,113,0.2);
+    }
+
+    .btn-danger:hover:not(:disabled) { background: rgba(248,113,113,0.2); }
+
+    .btn-ghost {
+      background: var(--surface2);
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-ghost:hover:not(:disabled) { color: var(--text); border-color: rgba(255,255,255,0.15); }
+
+    /* ── Info Bar ─────────────────────────────────────────── */
+    .info-bar {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .info-chip {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      padding: 5px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .info-chip .dot {
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: var(--text-dim);
+    }
+
+    .info-chip.live .dot { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .info-chip code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--accent2);
+    }
+
+    /* ── Footer ───────────────────────────────────────────── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 16px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    footer a { color: var(--accent2); text-decoration: none; }
+
+    /* ── Toast ────────────────────────────────────────────── */
+    .toast-container {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 1000;
+      pointer-events: none;
+    }
+
+    .toast {
+      padding: 12px 16px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 13px;
+      font-weight: 500;
+      max-width: 320px;
+      pointer-events: auto;
+      animation: toast-in 0.2s ease-out;
+      backdrop-filter: blur(12px);
+    }
+
+    .toast.success { border-color: rgba(34,211,160,0.3); color: var(--green); }
+    .toast.error   { border-color: rgba(248,113,113,0.3); color: var(--red); }
+    .toast.info    { border-color: rgba(124,108,248,0.3); color: var(--accent2); }
+
+    @keyframes toast-in {
+      from { opacity: 0; transform: translateX(16px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="app">
+    <!-- ── Header ── -->
+    <header>
+      <div class="logo">
+        <div class="logo-icon">🧠</div>
+        <div>
+          <div class="logo-text">NEXA</div>
+          <div class="logo-sub">Voice Agent Platform</div>
+        </div>
+      </div>
+      <div class="status-badge" id="statusBadge">
+        <div class="status-dot"></div>
+        <span id="statusText">Disconnected</span>
+      </div>
+    </header>
+
+    <!-- ── Main ── -->
+    <main>
+
+      <!-- Config Panel -->
+      <div class="panel" id="configPanel">
+        <div class="panel-header">
+          <span class="panel-icon">⚙️</span>
+          <span class="panel-title">Session Config</span>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <div class="field">
+              <label for="apiBase">API Base URL</label>
+              <input type="text" id="apiBase" value="http://localhost:8000" placeholder="http://localhost:8000" />
+            </div>
+            <div class="field">
+              <label for="agentId">Agent ID</label>
+              <input type="number" id="agentId" value="1" placeholder="1" />
+            </div>
+            <div class="field">
+              <label for="authToken">JWT Token</label>
+              <input type="text" id="authToken" placeholder="Paste your Bearer token here..." />
+            </div>
+            <div class="field">
+              <label for="sessionId">Session ID (optional)</label>
+              <input type="text" id="sessionId" placeholder="Auto-generated if blank" />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Voice Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-icon">🎙️</span>
+          <span class="panel-title">Voice Interface</span>
+        </div>
+        <div class="panel-body" style="display:flex;flex-direction:column;gap:24px;">
+
+          <!-- Orb + waveform -->
+          <div class="orb-section">
+            <div class="orb-wrapper">
+              <div class="orb-ring"></div>
+              <div class="orb-ring"></div>
+              <div class="orb-ring"></div>
+              <div class="orb" id="orb" onclick="handleOrbClick()">
+                <span class="orb-icon" id="orbIcon">🎤</span>
+              </div>
+            </div>
+            <div class="waveform" id="waveform">
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+              <div class="wave-bar"></div>
+            </div>
+            <div class="orb-label" id="orbLabel">Click the orb to connect</div>
+          </div>
+
+          <!-- Info chips (shown after connect) -->
+          <div class="info-bar" id="infoBar" style="display:none;">
+            <div class="info-chip live">
+              <div class="dot"></div>
+              <span>Connected to LiveKit</span>
+            </div>
+            <div class="info-chip">
+              <span>Room:</span>
+              <code id="roomChip">—</code>
+            </div>
+            <div class="info-chip">
+              <span>Session:</span>
+              <code id="sessionChip">—</code>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="actions">
+            <button class="btn btn-primary" id="connectBtn" onclick="connect()">
+              <span>🔗</span> Connect
+            </button>
+            <button class="btn btn-danger" id="disconnectBtn" onclick="disconnect()" disabled>
+              <span>✖</span> Disconnect
+            </button>
+            <button class="btn btn-ghost" id="clearBtn" onclick="clearTranscript()">
+              <span>🗑</span> Clear
+            </button>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Transcript Panel -->
+      <div class="panel">
+        <div class="panel-header">
+          <span class="panel-icon">💬</span>
+          <span class="panel-title">Conversation</span>
+        </div>
+        <div class="panel-body" style="padding-top:12px;">
+          <div class="transcript" id="transcript">
+            <div class="empty-state" id="emptyState">
+              <div class="empty-state-icon">🎙️</div>
+              Connect to an agent and start speaking
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- ── Footer ── -->
+    <footer>
+      <span>NEXA Voice Demo — Phase 7</span>
+      <span>
+        LiveKit + faster-whisper + piper-tts |
+        <a href="http://localhost:8000/docs" target="_blank">API Docs ↗</a>
+      </span>
+    </footer>
+  </div>
+
+  <!-- Toast container -->
+  <div class="toast-container" id="toasts"></div>
+
+  <script>
+    // ─── State ───────────────────────────────────────────────
+    let room = null;
+    let sessionData = null;
+    let isConnected = false;
+    let mediaStream = null;
+    let audioContext = null;
+    let analyser = null;
+    let animFrameId = null;
+
+    // ─── UI Helpers ──────────────────────────────────────────
+    function setStatus(state, text) {
+      const badge = document.getElementById('statusBadge');
+      const statusText = document.getElementById('statusText');
+      badge.className = `status-badge ${state}`;
+      statusText.textContent = text;
+    }
+
+    function setOrbState(state) {
+      const orb = document.getElementById('orb');
+      const icon = document.getElementById('orbIcon');
+      const label = document.getElementById('orbLabel');
+      const waveform = document.getElementById('waveform');
+
+      orb.className = `orb ${state}`;
+
+      const map = {
+        idle:        { icon: '🎤', label: 'Click the orb to connect' },
+        connecting:  { icon: '⌛', label: 'Connecting to LiveKit...' },
+        listening:   { icon: '👂', label: 'Listening... speak now' },
+        speaking:    { icon: '🔊', label: 'Agent is speaking...' },
+        processing:  { icon: '⚙️', label: 'Processing...' },
+        disconnected:{ icon: '🎤', label: 'Click to reconnect' },
+      };
+
+      const s = map[state] || map.idle;
+      icon.textContent = s.icon;
+      label.textContent = s.label;
+      waveform.classList.toggle('active', state === 'listening');
+    }
+
+    function toast(msg, type = 'info', duration = 3500) {
+      const container = document.getElementById('toasts');
+      const el = document.createElement('div');
+      el.className = `toast ${type}`;
+      el.textContent = msg;
+      container.appendChild(el);
+      setTimeout(() => el.remove(), duration);
+    }
+
+    function addMessage(role, text) {
+      const container = document.getElementById('transcript');
+      document.getElementById('emptyState')?.remove();
+
+      const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const isUser = role === 'user';
+
+      const msg = document.createElement('div');
+      msg.className = `message ${isUser ? 'user' : 'agent'}`;
+      msg.innerHTML = `
+        <div class="msg-avatar">${isUser ? '👤' : '🧠'}</div>
+        <div>
+          <div class="msg-bubble">${escapeHtml(text)}</div>
+          <div class="msg-meta">${isUser ? 'You' : 'Agent'} · ${time}</div>
+        </div>
+      `;
+      container.appendChild(msg);
+      container.scrollTop = container.scrollHeight;
+    }
+
+    function clearTranscript() {
+      const container = document.getElementById('transcript');
+      container.innerHTML = `
+        <div class="empty-state" id="emptyState">
+          <div class="empty-state-icon">🎙️</div>
+          Connect to an agent and start speaking
+        </div>`;
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function setConnectedUI(connected) {
+      document.getElementById('connectBtn').disabled = connected;
+      document.getElementById('disconnectBtn').disabled = !connected;
+      document.getElementById('infoBar').style.display = connected ? 'flex' : 'none';
+      document.getElementById('configPanel').style.opacity = connected ? '0.5' : '1';
+    }
+
+    // ─── Core: Create Voice Session via NEXA API ─────────────
+    async function createVoiceSession() {
+      const apiBase = document.getElementById('apiBase').value.trim();
+      const agentId = document.getElementById('agentId').value.trim();
+      const authToken = document.getElementById('authToken').value.trim();
+      const sessionId = document.getElementById('sessionId').value.trim() || undefined;
+
+      if (!authToken) {
+        toast('JWT token is required', 'error');
+        throw new Error('No auth token');
+      }
+
+      const resp = await fetch(`${apiBase}/agents/${agentId}/voice/session`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${authToken}`,
+        },
+        body: JSON.stringify({ session_id: sessionId }),
+      });
+
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || 'Failed to create voice session');
+      }
+
+      return await resp.json();
+    }
+
+    // ─── Connect ─────────────────────────────────────────────
+    async function connect() {
+      if (isConnected) return;
+
+      setOrbState('connecting');
+      setStatus('connecting', 'Connecting...');
+      document.getElementById('connectBtn').disabled = true;
+
+      try {
+        // 1. Get LiveKit session from NEXA
+        sessionData = await createVoiceSession();
+
+        toast(`Session created: ${sessionData.room_name}`, 'success');
+        document.getElementById('roomChip').textContent = sessionData.room_name;
+        document.getElementById('sessionChip').textContent = sessionData.session_id.substring(0, 8) + '...';
+
+        // 2. Connect to LiveKit room
+        room = new LivekitClient.Room({
+          adaptiveStream: true,
+          dynacast: true,
+        });
+
+        // Room events
+        room.on(LivekitClient.RoomEvent.Connected, onRoomConnected);
+        room.on(LivekitClient.RoomEvent.Disconnected, onRoomDisconnected);
+        room.on(LivekitClient.RoomEvent.TrackSubscribed, onTrackSubscribed);
+        room.on(LivekitClient.RoomEvent.ActiveSpeakersChanged, onActiveSpeakersChanged);
+        room.on(LivekitClient.RoomEvent.MediaDevicesError, (e) => {
+          toast(`Microphone error: ${e.message}`, 'error');
+        });
+
+        await room.connect(sessionData.livekit_url, sessionData.token, {
+          autoSubscribe: true,
+        });
+
+      } catch (err) {
+        console.error('Connection failed:', err);
+        toast(`Connection failed: ${err.message}`, 'error');
+        setOrbState('idle');
+        setStatus('error', 'Failed');
+        document.getElementById('connectBtn').disabled = false;
+      }
+    }
+
+    async function onRoomConnected() {
+      isConnected = true;
+      setStatus('connected', 'Live');
+      setConnectedUI(true);
+      toast(`Connected as ${sessionData.agent_name}`, 'success');
+
+      // Publish microphone
+      try {
+        await room.localParticipant.setMicrophoneEnabled(true);
+        setOrbState('listening');
+        toast('Microphone enabled — start speaking!', 'info');
+        startVisualization();
+      } catch (e) {
+        toast('Could not enable microphone: ' + e.message, 'error');
+      }
+    }
+
+    function onRoomDisconnected(reason) {
+      isConnected = false;
+      setOrbState('disconnected');
+      setStatus('', 'Disconnected');
+      setConnectedUI(false);
+      stopVisualization();
+      if (reason) toast(`Disconnected: ${reason}`, 'info');
+    }
+
+    function onTrackSubscribed(track, pub, participant) {
+      if (track.kind === LivekitClient.Track.Kind.Audio) {
+        // Play agent's audio response
+        const audioEl = track.attach();
+        audioEl.autoplay = true;
+        document.body.appendChild(audioEl);
+
+        // When agent audio starts playing — update orb state
+        audioEl.addEventListener('play', () => setOrbState('speaking'));
+        audioEl.addEventListener('ended', () => setOrbState('listening'));
+        audioEl.addEventListener('pause', () => setOrbState('listening'));
+      }
+    }
+
+    function onActiveSpeakersChanged(speakers) {
+      const localIsSpeaking = speakers.some(s => s.isSpeaking && s.isLocal);
+      if (localIsSpeaking) {
+        setOrbState('listening');
+      }
+    }
+
+    // ─── Disconnect ───────────────────────────────────────────
+    async function disconnect() {
+      if (!isConnected || !room) return;
+
+      try {
+        await room.disconnect();
+      } catch (e) {
+        console.error(e);
+      }
+
+      // Call NEXA API to end the session
+      if (sessionData) {
+        try {
+          const apiBase = document.getElementById('apiBase').value.trim();
+          const authToken = document.getElementById('authToken').value.trim();
+          await fetch(`${apiBase}/agents/${sessionData.agent_id}/voice/session/${sessionData.room_name}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${authToken}` },
+          });
+        } catch (e) { /* ignore */ }
+      }
+
+      room = null;
+      sessionData = null;
+      isConnected = false;
+      setOrbState('idle');
+      setStatus('', 'Disconnected');
+      setConnectedUI(false);
+      stopVisualization();
+      toast('Session ended', 'info');
+    }
+
+    // ─── Orb Click ────────────────────────────────────────────
+    function handleOrbClick() {
+      if (!isConnected) {
+        connect();
+      }
+    }
+
+    // ─── Audio Visualization ──────────────────────────────────
+    function startVisualization() {
+      if (animFrameId) return;
+      const bars = document.querySelectorAll('.wave-bar');
+
+      const animate = () => {
+        bars.forEach(bar => {
+          const h = 4 + Math.random() * 24;
+          bar.style.height = `${h}px`;
+        });
+        animFrameId = requestAnimationFrame(animate);
+      };
+
+      animFrameId = requestAnimationFrame(animate);
+    }
+
+    function stopVisualization() {
+      if (animFrameId) {
+        cancelAnimationFrame(animFrameId);
+        animFrameId = null;
+      }
+      document.querySelectorAll('.wave-bar').forEach(b => b.style.height = '8px');
+    }
+
+    // ─── Keyboard shortcut: Space to toggle ──────────────────
+    document.addEventListener('keydown', (e) => {
+      if (e.code === 'Space' && e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') {
+        e.preventDefault();
+        if (!isConnected) connect();
+      }
+      if (e.code === 'Escape' && isConnected) {
+        disconnect();
+      }
+    });
+
+    // ─── Page unload cleanup ──────────────────────────────────
+    window.addEventListener('beforeunload', () => {
+      if (isConnected) disconnect();
+    });
+  </script>
+</body>
+</html>

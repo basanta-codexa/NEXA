@@ -7,6 +7,10 @@ from services.memory_service import (
     add_message,
     get_conversation_history
 )
+from services.rag_service import (
+    search_knowledge_service,
+    build_grounded_context
+)
 
 from llm.factory import create_llm_client
 
@@ -149,12 +153,26 @@ def run_agent_engine_service(
     if agent is None:
         return None
 
+    # Retrieve verified knowledge base chunks for this tenant
+    retrieved_chunks = search_knowledge_service(
+        db=db,
+        tenant_id=tenant_id,
+        query=user_message,
+        top_k=3,
+        threshold=0.15
+    )
+    effective_system_prompt = agent.system_prompt or ""
+    if retrieved_chunks:
+        grounding_context = build_grounded_context(retrieved_chunks)
+        effective_system_prompt = f"{effective_system_prompt}\n\n{grounding_context}".strip()
+
     config = AgentConfig(
         model_name=agent.model_name,
         temperature=agent.temperature,
         max_tokens=agent.max_tokens,
         top_p=agent.top_p,
-        system_prompt=agent.system_prompt
+        system_prompt=effective_system_prompt,
+        tools=agent.tools
     )
     try:
         llm_client = create_llm_client(agent.model_name)
@@ -213,4 +231,8 @@ def run_agent_engine_service(
         )
         result["session_id"] = session_id
 
-    return result
+    if retrieved_chunks:
+        result["citations"] = retrieved_chunks
+
+    return result
+

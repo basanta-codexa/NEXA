@@ -1,3 +1,4 @@
+from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 from models import AgentStatus
 
@@ -111,3 +112,50 @@ class AgentRunRequest(BaseModel):
         strip_whitespace=True
     )
     session_id: str | None = None
+
+
+class CreateDocument(BaseModel):
+    title: str = Field(min_length=1, max_length=255, strip_whitespace=True)
+    content: str = Field(min_length=1, strip_whitespace=True)
+
+
+class DocumentChunkResponse(BaseModel):
+    id: int
+    chunk_index: int
+    content: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentResponse(BaseModel):
+    id: int
+    tenant_id: int
+    title: str
+    content: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentDetailResponse(BaseModel):
+    id: int
+    tenant_id: int
+    title: str
+    content: str
+    created_at: datetime
+    chunks: list[DocumentChunkResponse]
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentListResponse(BaseModel):
+    documents: list[DocumentResponse]
+
+
+class RAGSearchResult(BaseModel):
+    chunk_id: int
+    document_id: int
+    title: str
+    content: str
+    similarity: float
+

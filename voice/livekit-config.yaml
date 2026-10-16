@@ -1,0 +1,29 @@
+# LiveKit Server Configuration for NEXA
+# API key and secret must match the values in your .env file
+
+port: 7880
+rtc:
+  port_range_start: 50100
+  port_range_end: 50200
+  tcp_port: 7881
+  use_external_ip: false
+
+# API credentials (must match LIVEKIT_API_KEY and LIVEKIT_API_SECRET in .env)
+keys:
+  devkey: secret
+
+# Logging
+log_level: info
+
+# Room settings
+room:
+  # Auto-close empty rooms after 5 minutes
+  empty_timeout: 300
+  # Max participants per room
+  max_participants: 20
+
+# Webhook (optional — for production: send room events to NEXA FastAPI)
+# webhook:
+#   api_key: devkey
+#   urls:
+#     - http://host.docker.internal:8000/webhooks/livekit

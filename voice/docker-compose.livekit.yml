@@ -1,0 +1,28 @@
+# LiveKit Server — Self-Hosted Configuration
+# Run with: docker compose -f voice/docker-compose.livekit.yml up -d
+#
+# This starts the LiveKit server on localhost:7880 (WebSocket) and 7881 (TURN/TCP).
+# Use the same API key/secret as in your .env file.
+#
+# Prerequisites: Docker Desktop must be installed and running.
+# Install: https://www.docker.com/products/docker-desktop/
+
+services:
+  livekit:
+    image: livekit/livekit-server:latest
+    container_name: nexa-livekit
+    restart: unless-stopped
+    ports:
+      - "7880:7880"       # WebSocket — clients connect here
+      - "7881:7881"       # TURN/TCP  — WebRTC fallback
+      - "50100-50200:50100-50200/udp"  # WebRTC UDP media range
+    command: >
+      --config /etc/livekit/config.yaml
+    volumes:
+      - ./livekit-config.yaml:/etc/livekit/config.yaml:ro
+    networks:
+      - nexa-voice
+
+networks:
+  nexa-voice:
+    driver: bridge

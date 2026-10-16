@@ -15,8 +15,8 @@ A **multi-tenant SaaS voice agent platform** — where businesses (tenants) can 
 | 3 | Multi-tenancy | ✅ Done | ██████████ 100% |
 | 4 | Agent Engine | ✅ Done | ██████████ 100% |
 | 5 | Tool System | ✅ Done | ██████████ 100% |
-| 6 | RAG | ❌ Not started | ░░░░░░░░░░ 0% |
-| 7 | Voice (LiveKit + STT + TTS) | ❌ Not started | ░░░░░░░░░░ 0% |
+| 6 | RAG | ✅ Done | ██████████ 100% |
+| 7 | Voice (LiveKit + STT + TTS) | 🟡 In Progress | ████████░░ 80% |
 | 8 | Memory | ✅ Done | ██████████ 100% |
 | 9 | Evaluation | ❌ Not started | ░░░░░░░░░░ 0% |
 | 10 | Observability | ❌ Not started | ░░░░░░░░░░ 0% |
