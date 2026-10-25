@@ -1,0 +1,17 @@
+# NEXA core API dependencies (no voice models/audio stack).
+# Python 3.11+ required (tested on 3.12).
+
+alembic==1.20.0
+fastapi==0.141.1
+openai==3.24.0
+psycopg2-binary==2.9.13
+pydantic==2.13.5
+# argon2 is required by security.py (PasswordHash.recommended()).
+pwdlib[argon2]==0.3.1
+PyJWT==2.15.0
+pypdf==6.20.0
+python-dotenv==1.2.3
+python-multipart==0.0.32
+requests==2.34.2
+SQLAlchemy==2.0.54
+uvicorn[standard]==0.53.0

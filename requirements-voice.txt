@@ -1,0 +1,12 @@
+# Voice worker dependencies (LiveKit + local STT/TTS).
+# Install with: pip install -r requirements-voice.txt
+
+-r requirements.txt
+
+faster-whisper==1.2.1
+livekit==1.1.20
+livekit-agents==1.8.8
+livekit-api==1.2.1
+livekit-plugins-silero==1.8.8
+numpy==2.5.4
+piper-tts==1.8.0
