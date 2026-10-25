@@ -1,36 +1,43 @@
-from sqlalchemy import create_engine, text
-from sqlalchemy.engine import URL
-from sqlalchemy.orm import sessionmaker
-from dotenv import load_dotenv
-from models import Base
+import logging
 import os
 
+from dotenv import load_dotenv
+from sqlalchemy import create_engine
+from sqlalchemy.engine import URL
+from sqlalchemy.orm import sessionmaker
+
+from models import Base
 
 load_dotenv()
 
+logger = logging.getLogger(__name__)
 
-DB_HOST = os.getenv("DB_HOST")
-DB_PORT = os.getenv("DB_PORT")
-DB_NAME = os.getenv("DB_NAME")
-DB_USER = os.getenv("DB_USER")
-DB_PASSWORD = os.getenv("DB_PASSWORD")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_NAME = os.getenv("DB_NAME", "nexa")
+DB_USER = os.getenv("DB_USER", "postgres")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "")
 
-
-DATABASE_URL = URL.create(
+DATABASE_URL = os.getenv("DATABASE_URL") or URL.create(
     drivername="postgresql+psycopg2",
     username=DB_USER,
     password=DB_PASSWORD,
     host=DB_HOST,
     port=int(DB_PORT),
-    database=DB_NAME
+    database=DB_NAME,
 )
 
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_size=int(os.getenv("DB_POOL_SIZE", "5")),
+    max_overflow=int(os.getenv("DB_MAX_OVERFLOW", "10")),
+)
 
 SessionLocal = sessionmaker(
     bind=engine,
     autocommit=False,
-    autoflush=False
+    autoflush=False,
 )
 
 
@@ -41,8 +48,7 @@ def get_db():
     finally:
         db.close()
 
-# used to connection test the database connection
-Base.metadata.create_all(engine)
-# with engine.connect() as connection:
-#     result = connection.execute(text("SELECT 1"))
-#     print(result.scalar())
+
+def init_db() -> None:
+    """Create tables directly. Prefer `alembic upgrade head` in production."""
+    Base.metadata.create_all(engine)

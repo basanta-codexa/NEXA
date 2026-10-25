@@ -75,11 +75,22 @@ def create_document_from_file_service(
     )
 
 
-def get_documents_service(db: Session, tenant_id: int) -> list[Document]:
+def get_documents_service(
+    db: Session,
+    tenant_id: int,
+    limit: int | None = None,
+    offset: int = 0,
+) -> list[Document]:
     """
-    Fetches all documents belonging to a tenant.
+    Fetches documents belonging to a tenant, newest first.
     """
-    return db.query(Document).filter(Document.tenant_id == tenant_id).all()
+    query = db.query(Document).filter(Document.tenant_id == tenant_id)
+    query = query.order_by(Document.created_at.desc())
+    if offset:
+        query = query.offset(offset)
+    if limit:
+        query = query.limit(limit)
+    return query.all()
 
 
 def get_document_service(db: Session, document_id: int, tenant_id: int) -> Document | None:
@@ -120,6 +131,11 @@ def search_knowledge_service(
     Embeds the user query, scans tenant chunks, computes combined hybrid score
     (dense vector similarity + BM25 keyword overlap), and returns top_k most relevant chunks.
     """
+    if not query or not query.strip():
+        return []
+
+    top_k = max(1, min(top_k, 20))
+
     if embedding_client is None:
         embedding_client = create_embedding_client()
 
@@ -177,7 +193,8 @@ def build_grounded_context(retrieved_chunks: list[dict[str, Any]]) -> str:
 
     context_lines = [
         "Use the following verified knowledge base excerpts to answer the user accurately. "
-        "Cite the document title when referencing facts:"
+        "Cite the document title when referencing facts. "
+        "If the excerpts do not contain the answer, say you do not know instead of guessing:"
     ]
     for idx, chunk in enumerate(retrieved_chunks, 1):
         context_lines.append(

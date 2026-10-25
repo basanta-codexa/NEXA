@@ -142,7 +142,8 @@ def run_agent(
         )
     if "error" in result:
         raise HTTPException(
-            status_code=400, detail=result["error"]
+            status_code=result.get("status_code", 400),
+            detail=result["error"],
         )
 
     return result

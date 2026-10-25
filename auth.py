@@ -13,6 +13,8 @@ JWT_ACCESS_TOKEN_EXPIRE_MINUTES = int(
 
 
 def create_access_token(user_id: int, tenant_id: int) -> str:
+    if not JWT_SECRET_KEY:
+        raise RuntimeError("JWT_SECRET_KEY must be set in .env")
 
     expire = datetime.now(timezone.utc) + \
         timedelta(minutes=JWT_ACCESS_TOKEN_EXPIRE_MINUTES)

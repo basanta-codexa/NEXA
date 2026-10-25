@@ -1,66 +1,93 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+import os
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy.orm import Session
+
 from database import get_db
+from dependencies.permissions import Permissions
+from dependencies.roles import require_permission
 from dependencies.tenant import get_current_tenant_id
 from schemas import (
     CreateDocument,
-    DocumentResponse,
     DocumentDetailResponse,
     DocumentListResponse,
-    RAGSearchResult
+    DocumentResponse,
+    RAGSearchResult,
 )
 from services.rag_service import (
-    create_document_service,
     create_document_from_file_service,
-    get_documents_service,
-    get_document_service,
+    create_document_service,
     delete_document_service,
-    search_knowledge_service
+    get_document_service,
+    get_documents_service,
+    search_knowledge_service,
 )
 
 router = APIRouter(
     prefix="/documents",
-    tags=["Documents & Knowledge"]
+    tags=["Documents & Knowledge"],
 )
 
+MAX_UPLOAD_MB = int(os.getenv("MAX_UPLOAD_MB", "10"))
+MAX_UPLOAD_BYTES = MAX_UPLOAD_MB * 1024 * 1024
 
-@router.post("", response_model=DocumentResponse)
+
+@router.post("", response_model=DocumentResponse, status_code=201)
 def create_document(
     doc: CreateDocument,
     db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id)
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(require_permission(Permissions.DOCUMENT_CREATE)),
 ):
-    new_doc = create_document_service(
+    return create_document_service(
         db=db,
         tenant_id=tenant_id,
         title=doc.title,
-        content=doc.content
+        content=doc.content,
     )
-    return new_doc
 
 
-@router.post("/upload", response_model=DocumentResponse)
+@router.post("/upload", response_model=DocumentResponse, status_code=201)
 async def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id)
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(require_permission(Permissions.DOCUMENT_CREATE)),
 ):
-    file_bytes = await file.read()
-    new_doc = create_document_from_file_service(
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="A filename is required.")
+
+    file_bytes = await file.read(MAX_UPLOAD_BYTES + 1)
+    if len(file_bytes) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File is larger than the {MAX_UPLOAD_MB} MB limit.",
+        )
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+
+    return create_document_from_file_service(
         db=db,
         tenant_id=tenant_id,
-        filename=file.filename or "uploaded_file.txt",
-        file_bytes=file_bytes
+        filename=file.filename,
+        file_bytes=file_bytes,
     )
-    return new_doc
 
 
 @router.get("", response_model=DocumentListResponse)
 def get_documents(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id)
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(require_permission(Permissions.DOCUMENT_READ)),
 ):
-    docs = get_documents_service(db=db, tenant_id=tenant_id)
+    docs = get_documents_service(
+        db=db,
+        tenant_id=tenant_id,
+        limit=limit,
+        offset=offset,
+    )
     return {"documents": docs}
 
 
@@ -68,7 +95,8 @@ def get_documents(
 def get_document(
     document_id: int,
     db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id)
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(require_permission(Permissions.DOCUMENT_READ)),
 ):
     doc = get_document_service(db=db, document_id=document_id, tenant_id=tenant_id)
     if doc is None:
@@ -80,9 +108,12 @@ def get_document(
 def delete_document(
     document_id: int,
     db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id)
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(require_permission(Permissions.DOCUMENT_DELETE)),
 ):
-    success = delete_document_service(db=db, document_id=document_id, tenant_id=tenant_id)
+    success = delete_document_service(
+        db=db, document_id=document_id, tenant_id=tenant_id
+    )
     if not success:
         raise HTTPException(status_code=404, detail="Document not found")
     return {"message": "Document deleted successfully"}
@@ -90,15 +121,15 @@ def delete_document(
 
 @router.post("/search", response_model=list[RAGSearchResult])
 def search_knowledge(
-    query: str,
-    top_k: int = 3,
+    query: str = Query(min_length=1, max_length=1000),
+    top_k: int = Query(default=3, ge=1, le=20),
     db: Session = Depends(get_db),
-    tenant_id: int = Depends(get_current_tenant_id)
+    tenant_id: int = Depends(get_current_tenant_id),
+    current_user=Depends(require_permission(Permissions.DOCUMENT_READ)),
 ):
-    results = search_knowledge_service(
+    return search_knowledge_service(
         db=db,
         tenant_id=tenant_id,
         query=query,
-        top_k=top_k
+        top_k=top_k,
     )
-    return results
