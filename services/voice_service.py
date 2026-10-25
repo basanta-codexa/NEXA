@@ -4,13 +4,14 @@ Handles creating LiveKit voice sessions for agents.
 """
 from __future__ import annotations
 
-import uuid
 import logging
 import os
 from typing import Optional
 
 from sqlalchemy.orm import Session
+
 from models import Agent
+from voice.context import build_room_name, normalize_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -26,29 +27,13 @@ def create_voice_session_service(
     Creates a LiveKit voice session for a NEXA agent.
 
     Steps:
-    1. Validate the agent exists and belongs to the tenant.
-    2. Generate a unique room name.
-    3. Register the room in the RoomManager.
-    4. Generate a LiveKit access token for the client.
-    5. Return the room name, token, and LiveKit URL.
-
-    Args:
-        db: Database session.
-        agent_id: ID of the NEXA agent to connect.
-        tenant_id: Tenant making the request.
-        user_id: Optional user ID for conversation tracking.
-        session_id: Optional session ID (created if not provided).
-
-    Returns:
-        Dict with room_name, token, livekit_url, session_id.
-
-    Raises:
-        ValueError: If agent not found or not active.
-        RuntimeError: If LiveKit credentials are missing.
+    1. Validate the agent exists, belongs to the tenant, and is ACTIVE.
+    2. Normalize the session id and build a self-describing room name.
+    3. Register the room in the API-process registry (for listing).
+    4. Mint a LiveKit access token for the client.
     """
     from voice.room_manager import get_room_manager, generate_livekit_token
 
-    # 1. Validate agent
     agent = db.query(Agent).filter(
         Agent.id == agent_id,
         Agent.tenant_id == tenant_id,
@@ -63,13 +48,9 @@ def create_voice_session_service(
             "Activate the agent before starting a voice session."
         )
 
-    # 2. Generate room name + session ID
-    if not session_id:
-        session_id = str(uuid.uuid4())
+    session_id = normalize_session_id(session_id)
+    room_name = build_room_name(tenant_id, agent_id, session_id)
 
-    room_name = f"nexa-{tenant_id}-{agent_id}-{session_id[:8]}"
-
-    # 3. Register room
     room_manager = get_room_manager()
     room_manager.register_room(
         room_name=room_name,
@@ -79,19 +60,22 @@ def create_voice_session_service(
         user_id=user_id,
     )
 
-    # 4. Generate LiveKit token for client
     participant_identity = f"user-{user_id or 'anon'}-{session_id[:6]}"
     token = generate_livekit_token(
         room_name=room_name,
         participant_identity=participant_identity,
         participant_name=f"User ({agent.name})",
+        ttl_seconds=int(os.getenv("LIVEKIT_TOKEN_TTL_SECONDS", "3600")),
     )
 
     livekit_url = os.getenv("LIVEKIT_URL", "ws://localhost:7880")
 
     logger.info(
-        f"Voice session created: room={room_name}, agent={agent.name}, "
-        f"tenant={tenant_id}, session={session_id}"
+        "Voice session created: room=%s, agent=%s, tenant=%s, session=%s",
+        room_name,
+        agent.name,
+        tenant_id,
+        session_id,
     )
 
     return {
@@ -105,19 +89,10 @@ def create_voice_session_service(
 
 
 def list_voice_sessions_service(tenant_id: int) -> list[dict]:
-    """
-    List active voice sessions for a tenant.
-
-    Args:
-        tenant_id: The tenant to list sessions for.
-
-    Returns:
-        List of active room info dicts.
-    """
+    """List active voice sessions for a tenant."""
     from voice.room_manager import get_room_manager
 
-    room_manager = get_room_manager()
-    rooms = room_manager.tenant_rooms(tenant_id)
+    rooms = get_room_manager().tenant_rooms(tenant_id)
 
     return [
         {
@@ -132,16 +107,7 @@ def list_voice_sessions_service(tenant_id: int) -> list[dict]:
 
 
 def end_voice_session_service(room_name: str, tenant_id: int) -> bool:
-    """
-    Ends a voice session by removing it from the room registry.
-
-    Args:
-        room_name: The room to end.
-        tenant_id: Tenant making the request (for isolation validation).
-
-    Returns:
-        True if removed, False if not found.
-    """
+    """Remove a session from the registry, enforcing tenant ownership."""
     from voice.room_manager import get_room_manager
 
     room_manager = get_room_manager()

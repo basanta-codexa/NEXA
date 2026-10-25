@@ -1,127 +1,118 @@
 """
 NEXA Voice — Text-to-Speech (TTS)
-Uses piper-tts for local, zero-cost, high-quality voice synthesis.
+
+Uses piper-tts 1.8+, which returns iterable AudioChunks instead of writing to
+a wave file. Models are downloaded automatically on first use.
 """
 from __future__ import annotations
 
 import io
 import logging
 import os
-import struct
 import wave
+from pathlib import Path
 from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Default piper voice model (English).
-# Models auto-download from HuggingFace on first use.
 DEFAULT_VOICE = "en_US-lessac-medium"
 
 
 class PiperTTS:
-    """
-    Wraps piper-tts for synchronous text-to-speech synthesis.
-    Lazy-loads the voice model on first use.
-
-    Piper is the production-ready open-source TTS from the Rhasspy/Coqui lineage.
-    Models are downloaded automatically from HuggingFace on first use.
-    """
+    """Wraps piper-tts for synchronous text-to-speech synthesis."""
 
     def __init__(self, voice: str = DEFAULT_VOICE, speaker_id: Optional[int] = None):
-        """
-        Args:
-            voice: Piper voice model name (e.g. "en_US-lessac-medium").
-                   Full list: https://rhasspy.github.io/piper-samples/
-            speaker_id: For multi-speaker models, the speaker index. None = default.
-        """
         self.voice = voice
         self.speaker_id = speaker_id
-        self._model = None  # lazy-loaded
+        self._model = None
+        self.models_dir = Path(
+            os.getenv(
+                "PIPER_MODELS_DIR",
+                Path(__file__).resolve().parent.parent / "voice_models",
+            )
+        )
 
     def _load_model(self):
-        """Lazy-load piper voice model on first synthesis call."""
-        if self._model is None:
+        if self._model is not None:
+            return self._model
+
+        try:
+            from piper import PiperVoice
+        except ImportError as exc:
+            raise RuntimeError(
+                "piper-tts is not installed. Run: pip install -r requirements-voice.txt"
+            ) from exc
+
+        self.models_dir.mkdir(parents=True, exist_ok=True)
+        model_path = self.models_dir / f"{self.voice}.onnx"
+        config_path = self.models_dir / f"{self.voice}.onnx.json"
+
+        if not model_path.exists():
             try:
-                from piper.voice import PiperVoice
-                import piper.download as piper_dl
-                import piper
-            except ImportError:
+                from piper.download_voices import download_voice
+            except ImportError as exc:
                 raise RuntimeError(
-                    "piper-tts is not installed. "
-                    "Run: pip install piper-tts"
-                )
+                    "piper download helper is unavailable. "
+                    f"Download '{self.voice}' into {self.models_dir} manually."
+                ) from exc
 
-            # Resolve model path — download if not cached
-            models_dir = os.path.join(os.path.dirname(__file__), "..", "voice_models")
-            os.makedirs(models_dir, exist_ok=True)
+            logger.info("Downloading piper voice model '%s'...", self.voice)
+            download_voice(self.voice, self.models_dir)
+            logger.info("Piper voice model downloaded.")
 
-            model_path = os.path.join(models_dir, f"{self.voice}.onnx")
-            config_path = os.path.join(models_dir, f"{self.voice}.onnx.json")
-
-            if not os.path.exists(model_path):
-                logger.info(f"Downloading piper voice model '{self.voice}'...")
-                piper_dl.ensure_voice_exists(
-                    self.voice,
-                    data_dirs=[models_dir],
-                    download_dir=models_dir,
-                )
-                logger.info(f"Voice model '{self.voice}' downloaded.")
-
-            logger.info(f"Loading piper voice '{self.voice}'...")
-            self._model = PiperVoice.load(model_path, config_path=config_path, use_cuda=False)
-            logger.info("Piper TTS model loaded.")
-
+        logger.info("Loading piper voice '%s'...", self.voice)
+        self._model = PiperVoice.load(
+            model_path,
+            config_path=config_path if config_path.exists() else None,
+            use_cuda=False,
+        )
+        logger.info("Piper TTS model loaded.")
         return self._model
 
-    def synthesize(self, text: str, sample_rate: int = 22050) -> bytes:
-        """
-        Synthesize text to raw PCM WAV audio bytes.
+    def _synthesize_chunks(self, text: str):
+        from piper.config import SynthesisConfig
 
-        Args:
-            text: The text to synthesize.
-            sample_rate: Output sample rate. Piper uses 22050 Hz by default.
-
-        Returns:
-            WAV audio bytes (16-bit PCM, mono).
-        """
         model = self._load_model()
-
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, "wb") as wav_file:
-            model.synthesize(
-                text,
-                wav_file,
-                speaker_id=self.speaker_id,
-            )
-
-        return wav_buffer.getvalue()
+        syn_config = SynthesisConfig(speaker_id=self.speaker_id)
+        return model.synthesize(text, syn_config=syn_config)
 
     def synthesize_pcm(self, text: str) -> tuple[bytes, int]:
-        """
-        Synthesize text and return raw PCM bytes + sample rate.
-        Useful when you need to send raw audio (e.g., to LiveKit).
+        """Synthesize text and return (raw 16-bit PCM bytes, sample_rate)."""
+        chunks = list(self._synthesize_chunks(text))
+        if not chunks:
+            return b"", 22050
 
-        Returns:
-            Tuple of (pcm_bytes, sample_rate).
-        """
-        wav_bytes = self.synthesize(text)
+        sample_rate = chunks[0].sample_rate
+        pcm = b"".join(chunk.audio_int16_bytes for chunk in chunks)
+        return pcm, sample_rate
 
-        # Strip the WAV header — return raw PCM
-        with io.BytesIO(wav_bytes) as buf:
-            with wave.open(buf, "rb") as wf:
-                sample_rate = wf.getframerate()
-                pcm_bytes = wf.readframes(wf.getnframes())
+    def synthesize(self, text: str) -> bytes:
+        """Synthesize text and return mono 16-bit WAV bytes."""
+        chunks = list(self._synthesize_chunks(text))
+        if not chunks:
+            return b""
 
-        return pcm_bytes, sample_rate
+        sample_rate = chunks[0].sample_rate
+        sample_width = chunks[0].sample_width
+        channels = chunks[0].sample_channels
+        pcm = b"".join(chunk.audio_int16_bytes for chunk in chunks)
+
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
+            wav_file.setnchannels(channels)
+            wav_file.setsampwidth(sample_width)
+            wav_file.setframerate(sample_rate)
+            wav_file.writeframes(pcm)
+
+        return buffer.getvalue()
 
 
-# Module-level singleton (lazy-initialized)
 _default_tts: Optional[PiperTTS] = None
 
 
-def get_tts(voice: str = DEFAULT_VOICE) -> PiperTTS:
+def get_tts(voice: str | None = None) -> PiperTTS:
     """Returns a module-level shared TTS instance."""
     global _default_tts
     if _default_tts is None:
-        _default_tts = PiperTTS(voice=voice)
+        _default_tts = PiperTTS(voice=voice or os.getenv("PIPER_VOICE", DEFAULT_VOICE))
     return _default_tts

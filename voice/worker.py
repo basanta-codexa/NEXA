@@ -1,324 +1,318 @@
 """
 NEXA Voice — LiveKit Agent Worker
-The voice pipeline: LiveKit room → STT → AgentEngine → TTS → LiveKit room.
 
-This file is run as a standalone process (not imported by FastAPI):
-    python -m voice.worker
+Pipeline:
+    LiveKit room audio -> Silero VAD -> faster-whisper STT
+    -> NEXA AgentEngine (LLM + tools + memory + RAG) -> Piper TTS
+    -> LiveKit room audio
 
-Architecture:
-    1. Worker connects to LiveKit server and watches for participants joining rooms.
-    2. When a participant joins a room that has a registered NEXA agent:
-       a. Audio frames are collected until Voice Activity Detection (VAD) detects silence.
-       b. Collected frames → STT (faster-whisper) → transcript.
-       c. Transcript → AgentEngine.run() → LLM response text.
-       d. Response text → TTS (piper) → WAV audio bytes.
-       e. WAV bytes → published back to the LiveKit room.
-    3. The conversation history is preserved per session_id.
+Run as a standalone process:
+    python -m voice.worker dev        # or just: python -m voice.worker
+
+Context is resolved from the room name (see voice/context.py) so the worker
+works across processes and machines without shared memory.
 """
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import io
 import logging
 import os
-import uuid
-from typing import Any
+import sys
+import wave
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("nexa.voice.worker")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Lazy imports — only loaded when worker actually runs
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _require_livekit_agents():
-    try:
-        import livekit.agents
-        import livekit.agents.llm
-        import livekit.agents.stt
-        import livekit.agents.tts
-        import livekit.agents.vad
-        import livekit.agents.pipeline
-        return True
-    except ImportError:
-        return False
+VAD_SAMPLE_RATE = 16000
+OUTPUT_SAMPLE_RATE = 48000
+MIN_SPEECH_BYTES = VAD_SAMPLE_RATE * 2 * 0.15  # ignore <150ms blips
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# NEXA Voice Pipeline using livekit-agents
+# Audio output
 # ─────────────────────────────────────────────────────────────────────────────
 
-class NexaVoiceAgent:
-    """
-    A voice agent session for a single LiveKit room.
-    Handles the full STT → LLM → TTS pipeline.
-    """
+def _read_wav(wav_bytes: bytes) -> tuple[bytes, int, int]:
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wav_file:
+        if wav_file.getsampwidth() != 2:
+            raise ValueError("Only 16-bit PCM WAV is supported.")
+        return (
+            wav_file.readframes(wav_file.getnframes()),
+            wav_file.getframerate(),
+            wav_file.getnchannels(),
+        )
 
-    def __init__(
-        self,
-        agent_id: int,
-        tenant_id: int,
-        session_id: str,
-        user_id: int | None = None,
-    ):
-        self.agent_id = agent_id
-        self.tenant_id = tenant_id
-        self.session_id = session_id
-        self.user_id = user_id
 
-    async def process_audio_and_respond(
-        self,
-        audio_bytes: bytes,
-        sample_rate: int,
-        db_session_factory,
-    ) -> bytes | None:
-        """
-        Full pipeline: audio bytes → transcript → LLM → audio response.
+def _resample_pcm(pcm: bytes, source_rate: int, target_rate: int) -> bytes:
+    if source_rate == target_rate:
+        return pcm
 
-        Args:
-            audio_bytes: Raw PCM audio bytes from LiveKit.
-            sample_rate: Audio sample rate.
-            db_session_factory: SQLAlchemy session factory (from FastAPI dependency).
+    import numpy as np
 
-        Returns:
-            WAV audio bytes for the TTS response, or None if no transcript.
-        """
-        from voice.stt import get_stt
-        from voice.tts import get_tts
-        from services.agent_service import run_agent_engine_service
+    samples = np.frombuffer(pcm, dtype=np.int16)
+    if samples.size == 0:
+        return b""
 
-        # 1. STT — transcribe audio
-        stt = get_stt()
-        transcript = stt.transcribe_bytes(audio_bytes, sample_rate=sample_rate)
+    duration = samples.size / source_rate
+    target_count = max(1, int(round(duration * target_rate)))
+    source_positions = np.linspace(0.0, samples.size - 1, num=samples.size)
+    target_positions = np.linspace(0.0, samples.size - 1, num=target_count)
+    resampled = np.interp(target_positions, source_positions, samples.astype(np.float32))
+    return np.clip(resampled, -32768, 32767).astype(np.int16).tobytes()
 
-        if not transcript:
-            logger.debug("STT returned empty transcript — skipping.")
-            return None
 
-        logger.info(f"[Voice] Transcript: '{transcript}'")
+class AudioPublisher:
+    """Publishes agent speech on a single reusable audio track."""
 
-        # 2. AgentEngine — get LLM response
-        with db_session_factory() as db:
-            result = run_agent_engine_service(
-                db=db,
-                agent_id=self.agent_id,
-                tenant_id=self.tenant_id,
-                user_message=transcript,
-                session_id=self.session_id,
-                user_id=self.user_id,
-            )
+    def __init__(self, room):
+        self.room = room
+        self._source = None
+        self._publication = None
+        self._generation = 0
+        self._lock = asyncio.Lock()
 
-        if not result or "error" in result:
-            error = result.get("error", "Unknown error") if result else "Agent not found"
-            logger.error(f"[Voice] AgentEngine error: {error}")
-            response_text = "Sorry, I encountered an error. Please try again."
-        else:
-            response_text = result.get("response", "")
+    async def _ensure_started(self) -> None:
+        if self._source is not None:
+            return
 
-        if not response_text:
-            return None
+        from livekit import rtc
 
-        logger.info(f"[Voice] Response: '{response_text[:100]}...'")
+        self._source = rtc.AudioSource(
+            OUTPUT_SAMPLE_RATE, 1, queue_size_ms=1000
+        )
+        track = rtc.LocalAudioTrack.create_audio_track("nexa-voice", self._source)
+        self._publication = await self.room.local_participant.publish_track(
+            track,
+            rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE),
+        )
+        logger.info("[Voice] Published output audio track.")
 
-        # 3. TTS — synthesize response
-        tts = get_tts()
-        wav_bytes = tts.synthesize(response_text)
+    async def play(self, wav_bytes: bytes) -> None:
+        """Play WAV bytes, interrupting any previous playback."""
+        from livekit import rtc
 
-        return wav_bytes
+        pcm, sample_rate, channels = _read_wav(wav_bytes)
+        if channels != 1:
+            raise ValueError("TTS output must be mono.")
+        pcm = _resample_pcm(pcm, sample_rate, OUTPUT_SAMPLE_RATE)
+
+        async with self._lock:
+            await self._ensure_started()
+            generation = self._generation
+
+            samples_per_chunk = int(OUTPUT_SAMPLE_RATE * 0.02)  # 20ms
+            chunk_size = samples_per_chunk * 2  # 16-bit mono
+
+            for offset in range(0, len(pcm), chunk_size):
+                if generation != self._generation:
+                    logger.debug("[Voice] Playback interrupted.")
+                    return
+
+                chunk = pcm[offset:offset + chunk_size]
+                if len(chunk) < chunk_size:
+                    chunk = chunk.ljust(chunk_size, b"\x00")
+
+                frame = rtc.AudioFrame(
+                    data=chunk,
+                    sample_rate=OUTPUT_SAMPLE_RATE,
+                    num_channels=1,
+                    samples_per_channel=samples_per_chunk,
+                )
+                await self._source.capture_frame(frame)
+
+            await self._source.wait_for_playout()
+
+    def interrupt(self) -> None:
+        """Stop playback immediately (barge-in)."""
+        if self._source is None:
+            return
+        self._generation += 1
+        self._source.clear_queue()
+
+    async def aclose(self) -> None:
+        if self._source is not None:
+            self._source.clear_queue()
+        if self._publication is not None:
+            with contextlib.suppress(Exception):
+                await self.room.local_participant.unpublish_track(
+                    self._publication.sid
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# LiveKit Agents Entrypoint
+# Per-participant listening loop
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def entrypoint(ctx):
-    """
-    LiveKit Agents entrypoint — called when a participant joins a room.
-    
-    The room name encodes the agent context: "nexa-{agent_id}-{tenant_id}-{session_id}"
-    """
+async def _listen_to_participant(
+    track,
+    participant_identity: str,
+    context,
+    publisher: AudioPublisher,
+) -> None:
     from livekit import rtc
-    from livekit.agents import JobContext
-    from voice.room_manager import get_room_manager
-    from voice.stt import get_stt
-    from voice.tts import get_tts
-    from database import SessionLocal
+    from livekit.agents.vad import VADEventType
+    from livekit.plugins import silero
 
-    room: rtc.Room = ctx.room
-    room_name = room.name
+    from voice.pipeline import run_voice_turn
 
-    logger.info(f"[Worker] Connected to room: {room_name}")
-
-    # Look up NEXA agent context from room registry
-    room_manager = get_room_manager()
-    room_info = room_manager.get_room(room_name)
-
-    if room_info is None:
-        logger.error(f"[Worker] No room info found for '{room_name}' — disconnecting.")
-        await ctx.disconnect()
-        return
-
-    voice_agent = NexaVoiceAgent(
-        agent_id=room_info.agent_id,
-        tenant_id=room_info.tenant_id,
-        session_id=room_info.session_id,
-        user_id=room_info.user_id,
+    vad = silero.VAD.load(
+        min_silence_duration=float(os.getenv("VAD_MIN_SILENCE_SECONDS", "0.55")),
+        activation_threshold=float(os.getenv("VAD_ACTIVATION_THRESHOLD", "0.5")),
+    )
+    vad_stream = vad.stream()
+    audio_stream = rtc.AudioStream(
+        track,
+        sample_rate=VAD_SAMPLE_RATE,
+        num_channels=1,
     )
 
-    # Collect audio frames per participant
-    audio_buffers: dict[str, list[bytes]] = {}
-    SAMPLE_RATE = 16000
+    async def feed_vad() -> None:
+        try:
+            async for frame_event in audio_stream:
+                vad_stream.push_frame(frame_event.frame)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("[Voice] Audio stream failed for %s", participant_identity)
+        finally:
+            vad_stream.end_input()
+
+    feed_task = asyncio.create_task(feed_vad())
+
+    try:
+        async for event in vad_stream:
+            if event.type == VADEventType.START_OF_SPEECH:
+                publisher.interrupt()
+                continue
+
+            if event.type != VADEventType.END_OF_SPEECH:
+                continue
+
+            frames = event.frames or []
+            pcm = b"".join(bytes(frame.data) for frame in frames)
+            if len(pcm) < MIN_SPEECH_BYTES:
+                continue
+
+            logger.info("[Voice] Speech from %s (%.2fs)", participant_identity, len(pcm) / 2 / VAD_SAMPLE_RATE)
+
+            try:
+                result = await asyncio.to_thread(
+                    run_voice_turn, pcm, VAD_SAMPLE_RATE, context
+                )
+            except Exception:
+                logger.exception("[Voice] Turn failed for %s", participant_identity)
+                continue
+
+            if result is None:
+                continue
+
+            await publisher.play(result.wav_bytes)
+
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logger.exception("[Voice] Listener crashed for %s", participant_identity)
+    finally:
+        feed_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await feed_task
+        with contextlib.suppress(Exception):
+            await vad_stream.aclose()
+        with contextlib.suppress(Exception):
+            await audio_stream.aclose()
+        logger.info("[Voice] Stopped listening to %s", participant_identity)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# LiveKit entrypoint
+# ─────────────────────────────────────────────────────────────────────────────
+
+async def entrypoint(ctx) -> None:
+    from dataclasses import replace
+
+    from livekit import rtc
+
+    from voice.context import resolve_room_context
+    from voice.room_manager import get_room_manager
+
+    room = ctx.room
+    await ctx.connect()
+    logger.info("[Voice] Worker connected to room %s", room.name)
+
+    context = resolve_room_context(room.name, room.metadata)
+    if context is None:
+        logger.error(
+            "[Voice] Room '%s' has no NEXA context. Use POST /agents/{id}/voice/session.",
+            room.name,
+        )
+        ctx.shutdown("missing_nexa_context")
+        return
+
+    # Same-process convenience: the API registry can carry user_id.
+    room_info = get_room_manager().get_room(room.name)
+    if room_info is not None and room_info.user_id is not None:
+        context = replace(context, user_id=room_info.user_id)
+
+    logger.info(
+        "[Voice] Session agent=%s tenant=%s session=%s",
+        context.agent_id,
+        context.tenant_id,
+        context.session_id,
+    )
+
+    publisher = AudioPublisher(room)
+    listener_tasks: set[asyncio.Task] = set()
+    handled_tracks: set[str] = set()
+
+    def handle_track(track, participant_identity: str) -> None:
+        if track.kind != rtc.TrackKind.KIND_AUDIO:
+            return
+        if track.sid in handled_tracks:
+            return
+
+        handled_tracks.add(track.sid)
+        task = asyncio.create_task(
+            _listen_to_participant(track, participant_identity, context, publisher)
+        )
+        listener_tasks.add(task)
+        task.add_done_callback(listener_tasks.discard)
+        logger.info("[Voice] Listening to %s", participant_identity)
 
     @room.on("track_subscribed")
     def on_track_subscribed(track, publication, participant):
-        if track.kind == rtc.TrackKind.KIND_AUDIO:
-            logger.info(f"[Worker] Subscribed to audio from: {participant.identity}")
-            asyncio.ensure_future(_handle_audio_track(track, participant.identity))
+        handle_track(track, participant.identity)
 
-    async def _handle_audio_track(track, participant_identity: str):
-        """Stream audio frames from a participant and process when VAD detects speech end."""
-        from livekit.agents.vad import VAD, VADEventType
+    # Handle tracks that were already subscribed before our handler registered.
+    for participant in list(room.remote_participants.values()):
+        for publication in list(participant.track_publications.values()):
+            if publication.track is not None:
+                handle_track(publication.track, participant.identity)
 
-        audio_stream = rtc.AudioStream(track)
-        vad = VAD.load()
-        stream = vad.stream()
+    shutdown_event = asyncio.Event()
 
-        # Feed audio frames to VAD
-        async def feed_audio():
-            async for frame_event in audio_stream:
-                stream.push_frame(frame_event.frame)
-            await stream.aclose()
+    async def on_shutdown(*_args) -> None:
+        shutdown_event.set()
 
-        asyncio.ensure_future(feed_audio())
+    ctx.add_shutdown_callback(on_shutdown)
+    await shutdown_event.wait()
 
-        # Process VAD events
-        async for event in stream:
-            if event.type == VADEventType.END_OF_SPEECH:
-                # Collect all frames from this speech segment
-                frames = event.frames
-                if not frames:
-                    continue
+    logger.info("[Voice] Room %s shutting down", room.name)
+    for task in list(listener_tasks):
+        task.cancel()
+    if listener_tasks:
+        await asyncio.gather(*listener_tasks, return_exceptions=True)
+    await publisher.aclose()
+    get_room_manager().remove_room(room.name)
 
-                # Concatenate PCM bytes
-                pcm_data = b"".join(
-                    bytes(frame.data) for frame in frames
-                )
-
-                logger.info(f"[Worker] Speech detected ({len(pcm_data)} bytes) from {participant_identity}")
-
-                # Run STT → LLM → TTS in thread pool (all blocking ops)
-                try:
-                    def _pipeline_sync(_pcm=pcm_data):
-                        from voice.stt import get_stt
-                        from voice.tts import get_tts
-                        from services.agent_service import run_agent_engine_service
-
-                        # STT
-                        transcript = get_stt().transcribe_bytes(_pcm, sample_rate=SAMPLE_RATE)
-                        if not transcript:
-                            return None
-
-                        logger.info(f"[Worker] Transcript: '{transcript}'")
-
-                        # LLM
-                        db = SessionLocal()
-                        try:
-                            result = run_agent_engine_service(
-                                db=db,
-                                agent_id=room_info.agent_id,
-                                tenant_id=room_info.tenant_id,
-                                user_message=transcript,
-                                session_id=room_info.session_id,
-                                user_id=room_info.user_id,
-                            )
-                        finally:
-                            db.close()
-
-                        if not result or "error" in result:
-                            err = result.get("error", "Unknown") if result else "Agent not found"
-                            logger.error(f"[Worker] AgentEngine error: {err}")
-                            response_text = "Sorry, I encountered an error."
-                        else:
-                            response_text = result.get("response", "")
-
-                        if not response_text:
-                            return None
-
-                        logger.info(f"[Worker] Response: '{response_text[:120]}'")
-
-                        # TTS
-                        return get_tts().synthesize(response_text)
-
-                    wav_response = await asyncio.get_event_loop().run_in_executor(
-                        None, _pipeline_sync
-                    )
-                except Exception as e:
-                    logger.exception(f"[Worker] Pipeline error: {e}")
-                    continue
-
-                if wav_response:
-                    await _publish_audio_response(wav_response)
-
-
-    async def _publish_audio_response(wav_bytes: bytes):
-        """Publish synthesized audio back to the LiveKit room."""
-        import wave
-        import io
-
-        try:
-            # Parse WAV header
-            with io.BytesIO(wav_bytes) as buf:
-                with wave.open(buf, "rb") as wf:
-                    sample_rate = wf.getframerate()
-                    num_channels = wf.getnchannels()
-                    pcm_data = wf.readframes(wf.getnframes())
-
-            # Create and publish audio source
-            source = rtc.AudioSource(sample_rate, num_channels)
-            track = rtc.LocalAudioTrack.create_audio_track("nexa-response", source)
-
-            options = rtc.TrackPublishOptions(source=rtc.TrackSource.SOURCE_MICROPHONE)
-            await room.local_participant.publish_track(track, options)
-
-            # Push PCM frames (chunks of 960 samples @ 48kHz = 20ms)
-            FRAMES_PER_CHUNK = int(sample_rate * 0.02)  # 20ms chunks
-            bytes_per_sample = 2  # 16-bit PCM
-            chunk_size = FRAMES_PER_CHUNK * num_channels * bytes_per_sample
-
-            for i in range(0, len(pcm_data), chunk_size):
-                chunk = pcm_data[i:i + chunk_size]
-                if len(chunk) < chunk_size:
-                    chunk = chunk.ljust(chunk_size, b"\x00")
-                frame = rtc.AudioFrame(
-                    data=chunk,
-                    sample_rate=sample_rate,
-                    num_channels=num_channels,
-                    samples_per_channel=FRAMES_PER_CHUNK,
-                )
-                await source.capture_frame(frame)
-                await asyncio.sleep(0.02)  # real-time pacing
-
-            logger.info("[Worker] Audio response published.")
-
-        except Exception as e:
-            logger.exception(f"[Worker] Failed to publish audio: {e}")
-
-    # Keep the worker alive until the room disconnects
-    await ctx.wait_for_disconnect()
-    room_manager.remove_room(room_name)
-    logger.info(f"[Worker] Room '{room_name}' disconnected — session ended.")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Worker entrypoint (run as: python -m voice.worker)
-# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    import sys
     from dotenv import load_dotenv
 
     load_dotenv()
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=os.getenv("LOG_LEVEL", "INFO").upper(),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         stream=sys.stdout,
     )
@@ -334,14 +328,17 @@ if __name__ == "__main__":
     try:
         from livekit.agents import WorkerOptions, cli
     except ImportError:
-        logger.error("livekit-agents not installed. Run: pip install 'livekit-agents[silero]'")
+        logger.error(
+            "livekit-agents is not installed. "
+            "Run: pip install -r requirements-voice.txt"
+        )
         sys.exit(1)
 
     cli.run_app(
         WorkerOptions(
             entrypoint_fnc=entrypoint,
+            ws_url=livekit_url,
             api_key=api_key,
             api_secret=api_secret,
-            ws_url=livekit_url,
         )
     )

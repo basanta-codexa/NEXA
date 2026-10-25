@@ -16,7 +16,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db
-from dependencies.auth import get_current_user
+from dependencies.permissions import Permissions
+from dependencies.roles import require_permission
 from dependencies.tenant import get_current_tenant_id
 from services.voice_service import (
     create_voice_session_service,
@@ -81,7 +82,7 @@ def start_voice_session(
     agent_id: int,
     body: VoiceSessionRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission(Permissions.AGENT_READ)),
     tenant_id: int = Depends(get_current_tenant_id),
 ):
     """
@@ -124,7 +125,7 @@ def start_voice_session(
 def list_voice_sessions(
     agent_id: int,
     tenant_id: int = Depends(get_current_tenant_id),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission(Permissions.AGENT_READ)),
 ):
     sessions = list_voice_sessions_service(tenant_id=tenant_id)
     # Filter to only this agent's sessions
@@ -142,7 +143,7 @@ def end_voice_session(
     agent_id: int,
     room_name: str,
     tenant_id: int = Depends(get_current_tenant_id),
-    current_user=Depends(get_current_user),
+    current_user=Depends(require_permission(Permissions.AGENT_READ)),
 ):
     try:
         removed = end_voice_session_service(

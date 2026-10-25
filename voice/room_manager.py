@@ -1,15 +1,21 @@
 """
-NEXA Voice — LiveKit Room Manager
-Manages the mapping of LiveKit rooms to NEXA agents + tenants.
-Generates LiveKit access tokens for clients.
+NEXA Voice — LiveKit room registry and token minting.
+
+The registry is intentionally in-memory: it only backs the "list active
+sessions" API in the API process. The voice worker is a separate process and
+does not rely on it — it resolves context from the room name/metadata (see
+voice/context.py). For multi-instance API deployments, move this registry to
+Redis.
 """
 from __future__ import annotations
 
+import logging
 import os
 import time
-import logging
 from dataclasses import dataclass, field
 from typing import Optional
+
+from voice.context import VoiceRoomContext
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +23,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RoomInfo:
     """Metadata for an active LiveKit voice session."""
+
     room_name: str
     agent_id: int
     tenant_id: int
@@ -24,15 +31,19 @@ class RoomInfo:
     user_id: Optional[int] = None
     created_at: float = field(default_factory=time.time)
 
+    @classmethod
+    def from_context(cls, room_name: str, context: VoiceRoomContext) -> "RoomInfo":
+        return cls(
+            room_name=room_name,
+            agent_id=context.agent_id,
+            tenant_id=context.tenant_id,
+            session_id=context.session_id,
+            user_id=context.user_id,
+        )
+
 
 class RoomManager:
-    """
-    In-memory registry of active voice rooms.
-    Maps room_name → RoomInfo.
-
-    In a production multi-node deployment, this would be backed by Redis.
-    For self-hosted single-node NEXA, in-memory is sufficient.
-    """
+    """In-memory registry of active voice rooms (single API process)."""
 
     def __init__(self):
         self._rooms: dict[str, RoomInfo] = {}
@@ -45,7 +56,6 @@ class RoomManager:
         session_id: str,
         user_id: Optional[int] = None,
     ) -> RoomInfo:
-        """Register a new voice room session."""
         info = RoomInfo(
             room_name=room_name,
             agent_id=agent_id,
@@ -54,25 +64,23 @@ class RoomManager:
             user_id=user_id,
         )
         self._rooms[room_name] = info
-        logger.info(f"Room registered: {room_name} (agent={agent_id}, tenant={tenant_id})")
+        logger.info(
+            "Room registered: %s (agent=%s, tenant=%s)", room_name, agent_id, tenant_id
+        )
         return info
 
     def get_room(self, room_name: str) -> Optional[RoomInfo]:
-        """Retrieve room info by room name."""
         return self._rooms.get(room_name)
 
     def remove_room(self, room_name: str) -> None:
-        """Remove a room when the session ends."""
         if room_name in self._rooms:
             del self._rooms[room_name]
-            logger.info(f"Room removed: {room_name}")
+            logger.info("Room removed: %s", room_name)
 
     def list_rooms(self) -> list[RoomInfo]:
-        """List all currently active rooms."""
         return list(self._rooms.values())
 
     def tenant_rooms(self, tenant_id: int) -> list[RoomInfo]:
-        """List rooms for a specific tenant."""
         return [r for r in self._rooms.values() if r.tenant_id == tenant_id]
 
 
@@ -85,26 +93,14 @@ def generate_livekit_token(
     """
     Generate a LiveKit access token for a client to join a room.
 
-    Reads LIVEKIT_API_KEY and LIVEKIT_API_SECRET from environment.
-
-    Args:
-        room_name: The LiveKit room to join.
-        participant_identity: Unique identity string for this participant.
-        participant_name: Display name for the participant.
-        ttl_seconds: Token validity duration in seconds (default 1 hour).
-
-    Returns:
-        Signed JWT access token string.
-
-    Raises:
-        RuntimeError: If livekit-api is not installed or env vars are missing.
+    Reads LIVEKIT_API_KEY and LIVEKIT_API_SECRET from the environment.
     """
     try:
         from livekit.api import AccessToken, VideoGrants
-    except ImportError:
+    except ImportError as exc:
         raise RuntimeError(
             "livekit-api is not installed. Run: pip install livekit-api"
-        )
+        ) from exc
 
     api_key = os.getenv("LIVEKIT_API_KEY")
     api_secret = os.getenv("LIVEKIT_API_SECRET")
@@ -121,7 +117,7 @@ def generate_livekit_token(
         can_subscribe=True,
     )
 
-    token = (
+    return (
         AccessToken(api_key, api_secret)
         .with_identity(participant_identity)
         .with_name(participant_name)
@@ -130,10 +126,7 @@ def generate_livekit_token(
         .to_jwt()
     )
 
-    return token
 
-
-# Module-level singleton
 _room_manager: Optional[RoomManager] = None
 
 
