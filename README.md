@@ -46,7 +46,7 @@ llm/                        OpenAI, Ollama, and fake LLM clients
 rag/                        Retrieval and document processing
 voice/                      LiveKit worker, STT/TTS, demo, compose file
 alembic/                    Database migrations
-scripts/                    Database/bootstrap utilities
+scripts/                    Database/bootstrap utilities and local dev runner
 ```
 
 ## Prerequisites
@@ -62,7 +62,35 @@ Tested with Python 3.14.1, PostgreSQL 18, Docker Desktop, and Ollama.
 
 Run these from the repository root.
 
-### 1. Start LiveKit
+### Recommended: one command
+
+Make sure Docker Desktop is running, then:
+
+```powershell
+.\scripts\dev.ps1 start
+```
+
+The script starts LiveKit first, waits for it to become reachable, then starts the API, voice worker, and demo server. It writes logs and PID files under `.dev/` and prints a status table.
+
+If PowerShell blocks the script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\dev.ps1 start
+```
+
+Other commands:
+
+```powershell
+.\scripts\dev.ps1 status
+.\scripts\dev.ps1 restart
+.\scripts\dev.ps1 stop
+```
+
+`stop` also stops the LiveKit container. It only stops API/worker/demo processes that this script started.
+
+### Manual alternative
+
+#### 1. Start LiveKit
 
 Make sure Docker Desktop is running.
 
@@ -70,13 +98,13 @@ Make sure Docker Desktop is running.
 docker compose -f voice/docker-compose.livekit.yml up -d
 ```
 
-### 2. Start the API
+#### 2. Start the API
 
 ```powershell
 .\venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
 ```
 
-### 3. Start the voice worker
+#### 3. Start the voice worker
 
 Start this only when you need voice. LiveKit must be running first.
 
@@ -84,13 +112,13 @@ Start this only when you need voice. LiveKit must be running first.
 .\venv\Scripts\python.exe -u -m voice.worker dev
 ```
 
-### 4. Serve the demo page
+#### 4. Serve the demo page
 
 ```powershell
 .\venv\Scripts\python.exe -m http.server 5500 --bind 127.0.0.1
 ```
 
-### 5. Open the app
+### Open the app
 
 | Surface | URL |
 |---|---|
