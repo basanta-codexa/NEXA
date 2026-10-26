@@ -1,6 +1,17 @@
+# Local environment
 .env
 venv/
 __pycache__/
 *.pyc
 .pytest_cache/
-test_*.py
+
+# Local-only ad-hoc probes at the repo root.
+# Committed tests belong in tests/.
+/test_*.py
+
+# Downloaded voice models and runtime artifacts
+voice_models/
+.dev/
+*.log
+.coverage
+htmlcov/
