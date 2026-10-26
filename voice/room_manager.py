@@ -13,6 +13,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
+from datetime import timedelta
 from typing import Optional
 
 from voice.context import VoiceRoomContext
@@ -122,7 +123,7 @@ def generate_livekit_token(
         .with_identity(participant_identity)
         .with_name(participant_name)
         .with_grants(grants)
-        .with_ttl(ttl_seconds)
+        .with_ttl(timedelta(seconds=ttl_seconds))
         .to_jwt()
     )
 

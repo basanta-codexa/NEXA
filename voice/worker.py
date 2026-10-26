@@ -22,6 +22,16 @@ import os
 import sys
 import wave
 
+# LiveKit registers plugins (and checks the thread) at import time. Import the
+# Silero plugin here, on the main thread, so jobs running in the worker's job
+# runner thread don't fail with "Plugins must be registered on the main thread".
+try:
+    from livekit.agents.vad import VADEventType
+    from livekit.plugins import silero
+except ImportError:  # voice extras not installed
+    VADEventType = None
+    silero = None
+
 logger = logging.getLogger("nexa.voice.worker")
 
 VAD_SAMPLE_RATE = 16000
@@ -151,10 +161,14 @@ async def _listen_to_participant(
     publisher: AudioPublisher,
 ) -> None:
     from livekit import rtc
-    from livekit.agents.vad import VADEventType
-    from livekit.plugins import silero
 
     from voice.pipeline import run_voice_turn
+
+    if silero is None or VADEventType is None:
+        raise RuntimeError(
+            "Voice dependencies are missing. "
+            "Run: pip install -r requirements-voice.txt"
+        )
 
     vad = silero.VAD.load(
         min_silence_duration=float(os.getenv("VAD_MIN_SILENCE_SECONDS", "0.55")),

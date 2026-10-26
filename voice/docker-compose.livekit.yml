@@ -18,6 +18,7 @@ services:
       - "50100-50200:50100-50200/udp"  # WebRTC UDP media range
     command: >
       --config /etc/livekit/config.yaml
+      --node-ip=127.0.0.1
     volumes:
       - ./livekit-config.yaml:/etc/livekit/config.yaml:ro
     networks:
