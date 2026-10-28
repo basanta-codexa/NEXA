@@ -6,6 +6,7 @@ import uuid
 from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
 load_dotenv()
@@ -82,6 +83,7 @@ def read_root():
 
 
 @app.get("/health", tags=["Meta"])
+@app.get("/ready", tags=["Meta"])
 def health():
     """Readiness probe: verifies the API can reach PostgreSQL."""
     try:
@@ -89,12 +91,15 @@ def health():
             connection.execute(text("SELECT 1"))
     except Exception as exc:
         logger.warning("health_check_failed error=%s", exc)
-        return {
-            "status": "degraded",
-            "service": "NEXA",
-            "version": APP_VERSION,
-            "database": "unavailable",
-        }
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "degraded",
+                "service": "NEXA",
+                "version": APP_VERSION,
+                "database": "unavailable",
+            },
+        )
 
     return {
         "status": "ok",

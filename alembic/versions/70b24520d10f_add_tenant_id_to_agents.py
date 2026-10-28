@@ -1,7 +1,7 @@
 """add tenant_id to agents
 
 Revision ID: 70b24520d10f
-Revises: 
+Revises: 0001_baseline
 Create Date: 2026-09-23 17:04:50.528385
 
 """
@@ -13,7 +13,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '70b24520d10f'
-down_revision: Union[str, Sequence[str], None] = None
+down_revision: Union[str, Sequence[str], None] = '0001_baseline'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

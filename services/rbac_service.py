@@ -15,7 +15,7 @@ from dependencies.permissions import (
     ROLE_MEMBER,
     Permissions,
 )
-from models import Permission, Role, Tenant
+from models import Permission, Role, Tenant, User
 
 logger = logging.getLogger(__name__)
 
@@ -72,6 +72,17 @@ def seed_tenant_roles(db: Session, tenant_id: int) -> dict[str, Role]:
             if name in permissions
         ]
         roles[role_name] = role
+
+    db.flush()
+
+    # Users created before RBAC was introduced only have the legacy ``role``
+    # string. Backfill their role_id so permission checks work.
+    for role_name, role in roles.items():
+        db.query(User).filter(
+            User.tenant_id == tenant_id,
+            User.role == role_name,
+            User.role_id.is_(None),
+        ).update({User.role_id: role.id}, synchronize_session=False)
 
     db.commit()
     return roles

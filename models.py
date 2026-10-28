@@ -1,7 +1,17 @@
 from datetime import datetime, timezone
 from sqlalchemy.orm import declarative_base, mapped_column, Mapped, relationship
 
-from sqlalchemy import String, ForeignKey, Table, Column, Enum, JSON, DateTime, Text
+from sqlalchemy import (
+    String,
+    ForeignKey,
+    Table,
+    Column,
+    Enum,
+    JSON,
+    DateTime,
+    Text,
+    UniqueConstraint,
+)
 from enum import Enum as PyEnum
 
 Base = declarative_base()
@@ -45,6 +55,9 @@ class Permission(Base):
 
 class Role(Base):
     __tablename__ = "roles"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_roles_tenant_name"),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
 
@@ -55,7 +68,8 @@ class Role(Base):
 
     tenant_id: Mapped[int] = mapped_column(
         ForeignKey("tenants.id"),
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     tenant: Mapped["Tenant"] = relationship(
@@ -105,8 +119,11 @@ class User(Base):
         ForeignKey("roles.id"), nullable=True
     )
     role_obj: Mapped["Role | None"] = relationship()
-    tenant_id: Mapped[int] = mapped_column(ForeignKey(
-        "tenants.id"), nullable=False)  # Foreign key to Tenant
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="users")
 
 
@@ -149,22 +166,43 @@ class Agent(Base):
         default=list
     )
 
-    tenant_id: Mapped[int] = mapped_column(ForeignKey(
-        "tenants.id"), nullable=False)  # Foreign key to Tenant
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )  # Foreign key to Tenant
     tenant: Mapped["Tenant"] = relationship(back_populates="agents")
-    conversations: Mapped[list["Conversation"]] = relationship(back_populates="agent")
+    conversations: Mapped[list["Conversation"]] = relationship(
+        back_populates="agent",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 
 
 class Conversation(Base):
     __tablename__ = "conversations"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "agent_id",
+            "session_id",
+            name="uq_conversations_tenant_agent_session",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     session_id: Mapped[str] = mapped_column(String(100), index=True, nullable=False)
     title: Mapped[str | None] = mapped_column(String(255), nullable=True)
 
-    agent_id: Mapped[int] = mapped_column(ForeignKey("agents.id"), nullable=False)
+    agent_id: Mapped[int] = mapped_column(
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        nullable=False,
+    )
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
-    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    user_id: Mapped[int | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
 
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -196,7 +234,11 @@ class Message(Base):
         nullable=False,
         index=True
     )
-    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    tenant_id: Mapped[int] = mapped_column(
+        ForeignKey("tenants.id"),
+        nullable=False,
+        index=True,
+    )
 
     role: Mapped[str] = mapped_column(String(50), nullable=False)  # "user", "assistant", "system", "tool"
     content: Mapped[str] = mapped_column(Text, nullable=False)

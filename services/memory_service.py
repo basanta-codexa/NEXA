@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from typing import Any
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from models import Conversation, Message
 
@@ -31,8 +32,18 @@ def get_or_create_conversation(
             updated_at=datetime.now(timezone.utc)
         )
         db.add(conversation)
-        db.commit()
-        db.refresh(conversation)
+        try:
+            db.commit()
+            db.refresh(conversation)
+        except IntegrityError:
+            # Another request created the same tenant/agent/session row
+            # between our SELECT and INSERT. Reuse it.
+            db.rollback()
+            conversation = db.query(Conversation).filter(
+                Conversation.tenant_id == tenant_id,
+                Conversation.agent_id == agent_id,
+                Conversation.session_id == session_id,
+            ).one()
 
     return conversation
 
