@@ -47,6 +47,10 @@ rag/                        Retrieval and document processing
 voice/                      LiveKit worker, STT/TTS, demo, compose file
 alembic/                    Database migrations
 scripts/                    Database/bootstrap utilities and local dev runner
+tests/                      Automated pytest suite (disposable PostgreSQL database)
+.github/workflows/          GitHub Actions CI
+Dockerfile                  Production-style API image
+docker-compose.yml          API + PostgreSQL stack
 ```
 
 ## Prerequisites
@@ -125,6 +129,20 @@ Start this only when you need voice. LiveKit must be running first.
 | API docs | http://127.0.0.1:8000/docs |
 | Health check | http://127.0.0.1:8000/health |
 | Voice demo | http://127.0.0.1:5500/voice/demo.html |
+
+## Docker Compose (API + PostgreSQL)
+
+The root `docker-compose.yml` runs PostgreSQL and the API in containers. It applies migrations and seeds RBAC automatically on startup.
+
+```powershell
+docker compose up --build
+```
+
+Then open http://127.0.0.1:8000/docs.
+
+The database is exposed on host port `5433` by default so it does not conflict with a local PostgreSQL server on `5432`. Override `NEXA_DB_PORT` if needed. Set `JWT_SECRET_KEY`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in `.env` for anything beyond a local demo.
+
+Stop the stack with `docker compose down`. Add `-v` to also delete the PostgreSQL volume and start fresh.
 
 ## First-time setup
 
@@ -297,9 +315,41 @@ Enter:
 
 The browser must be able to reach the LiveKit server on `ws://localhost:7880`. The compose file advertises `127.0.0.1` as the LiveKit node IP so a browser on the same machine can reach the published UDP/TCP media ports.
 
-## Testing and smoke checks
+## Testing
 
-There is currently no committed automated test suite. Use these smoke checks while developing:
+Install the development dependencies once:
+
+```powershell
+.\venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+```
+
+Run the suite:
+
+```powershell
+.\venv\Scripts\python.exe -m pytest
+```
+
+The tests create a disposable PostgreSQL database named `nexa_test_<id>` from the `DB_*` or `DATABASE_URL` settings in `.env`, apply every Alembic migration, run the tests, and drop the database afterward. Your development database (`nexa`) is never touched. The database user needs permission to create databases.
+
+The API tests use `TestClient`, the deterministic `fake` LLM client, and deterministic embeddings, so Ollama, OpenAI, and LiveKit are not required.
+
+Optional live Ollama integration test:
+
+```powershell
+$env:RUN_OLLAMA_TESTS = "1"
+.\venv\Scripts\python.exe -m pytest -m integration
+```
+
+Lint checks used by CI:
+
+```powershell
+.\venv\Scripts\ruff.exe check tests
+.\venv\Scripts\ruff.exe check . --select E9,F63,F7,F82
+```
+
+GitHub Actions runs the lint checks, migrations, `alembic check`, the full test suite, and a Docker image build on every push and pull request.
+
+### Manual smoke checks
 
 ```powershell
 # API and database

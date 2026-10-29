@@ -1,0 +1,25 @@
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = "-ra"
+markers = [
+    "integration: tests that need an external service (for example Ollama)",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = [
+    ".dev",
+    ".pytest_cache",
+    ".ruff_cache",
+    "venv",
+    "voice_models",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "B008",  # FastAPI uses Depends()/File() as default arguments by design.
+    "E501",  # Line length is handled by the formatter, not the linter.
+]

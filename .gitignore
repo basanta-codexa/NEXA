@@ -4,6 +4,7 @@ venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+.ruff_cache/
 
 # Local-only ad-hoc probes at the repo root.
 # Committed tests belong in tests/.

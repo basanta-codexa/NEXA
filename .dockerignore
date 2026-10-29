@@ -1,0 +1,16 @@
+.git
+.gitignore
+.env
+.env.*
+!.env.example
+venv
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+.ruff_cache
+.dev
+voice_models
+*.log
+test_*.py
+tests
