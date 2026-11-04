@@ -178,13 +178,20 @@ def db():
 
 
 @pytest.fixture
-def tenant_factory(client):
+def tenant_factory(client, db):
     """Create a tenant plus its first admin and return login details."""
     password = "TestPass123!"
 
     def create(prefix: str = "tenant") -> dict:
+        from services.signup_invites import create_tenant_invite
+
         suffix = uuid.uuid4().hex[:10]
         email = f"{prefix}_{suffix}@example.com"
+        _invite, invite_code = create_tenant_invite(
+            db,
+            description=f"pytest invite for {prefix}",
+            expires_in_days=1,
+        )
 
         response = client.post(
             "/tenants",
@@ -193,6 +200,7 @@ def tenant_factory(client):
                 "description": "pytest tenant",
                 "admin_email": email,
                 "admin_password": password,
+                "invite_code": invite_code,
             },
         )
         assert response.status_code == 201, response.text

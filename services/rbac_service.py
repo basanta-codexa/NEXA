@@ -48,7 +48,7 @@ def seed_permissions(db: Session) -> dict[str, Permission]:
             db.add(permission)
             existing[name] = permission
 
-    db.commit()
+    db.flush()
     return existing
 
 
@@ -86,7 +86,7 @@ def seed_tenant_roles(db: Session, tenant_id: int) -> dict[str, Role]:
             User.role_id.is_(None),
         ).update({User.role_id: role.id}, synchronize_session=False)
 
-    db.commit()
+    db.flush()
     return roles
 
 
@@ -102,5 +102,6 @@ def seed_all_tenants(db: Session) -> int:
     tenant_ids = [row[0] for row in db.query(Tenant.id).all()]
     for tenant_id in tenant_ids:
         seed_tenant_roles(db, tenant_id)
+        db.commit()
     logger.info("RBAC seeded for %d tenant(s)", len(tenant_ids))
     return len(tenant_ids)

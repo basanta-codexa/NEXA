@@ -44,7 +44,7 @@ It supports:
 
 See `PRODUCTION.md` for the full launch checklist. The first hard blockers are:
 
-1. Close public signup/run/voice authorization and add rate limits
+1. Add rate limits for login, run, and voice endpoints
 2. Build transactional, asynchronous ingestion
 3. Move retrieval to pgvector with real embeddings
 4. Add per-tenant usage ledger and quota enforcement

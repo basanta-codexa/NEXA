@@ -46,7 +46,7 @@ NEXA may be called production-ready only after all of the following are true:
 ## Current known limitations
 
 ### Security
-- Public tenant signup can create accounts without verification or rate limiting.
+- Tenant signup is invite-only and codes are one-time, but there is still no public rate limiting or bot detection.
 - Login has no lockout or end-to-end brute-force protection.
 - Email uniqueness is global rather than per-tenant.
 - JWT has no refresh/revocation workflow.

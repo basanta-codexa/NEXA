@@ -291,23 +291,38 @@ Follow the Quick start section above.
 
 ## Create a tenant and agent
 
-Tenant creation is public and creates the first admin user. There is no signup UI yet.
+Tenant creation is **invite-only**. A trusted operator must create a one-time invite code and share it with the person allowed to create the tenant. There is no signup UI yet.
 
-### 1. Create the tenant and admin
+### 1. Create a tenant signup invite
 
 ```powershell
+.\venv\Scripts\python.exe -m scripts.create_tenant_invite \
+  --description "Acme pilot" \
+  --days 7
+```
+
+The command prints the plaintext invite once. Copy it immediately; only its hash is stored. For a non-expiring invite, use `--days 0`.
+
+### 2. Create the tenant and admin
+
+```powershell
+$inviteCode = "nxa_..."  # Copy the invite created above; do not paste it into a file in the repo.
+
 $tenantBody = @{
   name = "Acme"
   description = "Demo tenant"
   admin_email = "admin@acme.com"
   admin_password = "ChangeMe123!"
+  invite_code = $inviteCode
 } | ConvertTo-Json
 
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/tenants" `
   -ContentType "application/json" -Body $tenantBody
 ```
 
-### 2. Log in
+Each invite can be used exactly once. If signup fails (for example because the admin email is already registered), the invite is not consumed and can be reused after the problem is fixed.
+
+### 3. Log in
 
 ```powershell
 $loginBody = @{
@@ -328,7 +343,7 @@ The default token lifetime is 30 minutes. To make local demo tokens last longer,
 JWT_ACCESS_TOKEN_EXPIRE_MINUTES=720
 ```
 
-### 3. Create an agent
+### 4. Create an agent
 
 ```powershell
 $agentBody = @{
@@ -347,7 +362,7 @@ $agent = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/agents" `
   -Headers $headers -ContentType "application/json" -Body $agentBody
 ```
 
-### 4. Activate the agent
+### 5. Activate the agent
 
 New agents are created as `draft`. Voice sessions reject agents that are not active.
 
@@ -356,7 +371,7 @@ Invoke-RestMethod -Method Patch -Uri "http://127.0.0.1:8000/agents/$($agent.id)/
   -Headers $headers -ContentType "application/json" -Body '{"status":"active"}'
 ```
 
-### 5. Test text chat
+### 6. Test text chat
 
 ```powershell
 Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/agents/$($agent.id)/run" `

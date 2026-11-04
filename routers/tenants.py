@@ -11,8 +11,9 @@ router = APIRouter(
 )
 
 
-# Public onboarding endpoint: creates a tenant, its default roles/permissions,
-# and (optionally) the first admin user.
+# Invite-only onboarding endpoint: the caller must provide a valid,
+# server-created, one-time invite code. Creates a tenant, its default
+# roles/permissions, and (optionally) the first admin user.
 @router.post("", status_code=201)
 def create_tenant(tenant: CreateTenant, db: Session = Depends(get_db)):
     new_tenant, admin_user = create_tenant_service(db, tenant)

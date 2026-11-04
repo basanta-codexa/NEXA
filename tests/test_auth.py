@@ -5,10 +5,22 @@ import uuid
 from models import Tenant, User
 
 
-def test_tenant_onboarding_and_login(client):
+def _create_invite(db, description: str = "auth test") -> str:
+    from services.signup_invites import create_tenant_invite
+
+    _invite, invite_code = create_tenant_invite(
+        db,
+        description=description,
+        expires_in_days=1,
+    )
+    return invite_code
+
+
+def test_tenant_onboarding_and_login(client, db):
     suffix = uuid.uuid4().hex[:10]
     email = f"owner_{suffix}@example.com"
     password = "OwnerPass123!"
+    invite_code = _create_invite(db)
 
     created = client.post(
         "/tenants",
@@ -17,6 +29,7 @@ def test_tenant_onboarding_and_login(client):
             "description": "auth test",
             "admin_email": email,
             "admin_password": password,
+            "invite_code": invite_code,
         },
     )
     assert created.status_code == 201, created.text
@@ -72,23 +85,32 @@ def test_protected_route_requires_a_valid_token(client):
     assert invalid.status_code == 401
 
 
-def test_duplicate_admin_email_is_rejected(client, tenant):
+def test_duplicate_admin_email_is_rejected(client, tenant, db):
+    invite_code = _create_invite(db, "duplicate email test")
+
     response = client.post(
         "/tenants",
         json={
             "name": "Duplicate Email Tenant",
             "admin_email": tenant["email"],
             "admin_password": "AnotherPass123!",
+            "invite_code": invite_code,
         },
     )
     assert response.status_code == 409, response.text
 
 
-def test_tenant_can_be_created_without_an_admin(client):
+def test_tenant_can_be_created_without_an_admin(client, db):
     suffix = uuid.uuid4().hex[:10]
+    invite_code = _create_invite(db, "no admin test")
+
     response = client.post(
         "/tenants",
-        json={"name": f"No Admin {suffix}", "description": "no admin"},
+        json={
+            "name": f"No Admin {suffix}",
+            "description": "no admin",
+            "invite_code": invite_code,
+        },
     )
     assert response.status_code == 201, response.text
     assert "admin_user" not in response.json()

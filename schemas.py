@@ -65,6 +65,7 @@ class CreateTenant(BaseModel):
     description: str = Field(default="", max_length=255)
     admin_email: str | None = Field(default=None, max_length=100)
     admin_password: str | None = Field(default=None, min_length=8, max_length=128)
+    invite_code: str = Field(min_length=1, max_length=256, strip_whitespace=True)
 
     @field_validator("admin_email")
     @classmethod
