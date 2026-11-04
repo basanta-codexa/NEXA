@@ -5,8 +5,7 @@ import uuid
 import pytest
 from sqlalchemy.exc import IntegrityError
 
-from dependencies.permissions import Permissions
-from models import Permission, Role, User
+from models import Role, User
 from security import hash_password
 from services.rbac_service import seed_tenant_roles
 

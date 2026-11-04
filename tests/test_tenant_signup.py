@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from models import Tenant, TenantSignupInvite
 from services.signup_invites import create_tenant_invite
@@ -40,7 +40,7 @@ def test_invalid_invite_code_is_rejected(client, db):
 
 def test_expired_invite_code_is_rejected(client, db):
     invite, code = _invite(db, "expired invite test")
-    invite.expires_at = datetime.now(timezone.utc) - timedelta(seconds=1)
+    invite.expires_at = datetime.now(UTC) - timedelta(seconds=1)
     db.commit()
 
     response = client.post(
