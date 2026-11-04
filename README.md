@@ -4,6 +4,8 @@ NEXA is a multi-tenant platform for building, running, and voicing AI agents wit
 
 The repository contains a FastAPI backend, a LiveKit-based voice pipeline, and a standalone browser demo. There is no separate React/Next frontend yet; the primary UI surfaces are Swagger and `voice/demo.html`.
 
+> **Production status:** NEXA is currently a well-structured multi-tenant agent API MVP, not a production-ready public service. See [`PRODUCTION.md`](PRODUCTION.md) for launch gates, known limitations, and the recommended path to a serious deployment.
+
 ## Architecture
 
 ```text
@@ -47,7 +49,9 @@ rag/                        Retrieval and document processing
 voice/                      LiveKit worker, STT/TTS, demo, compose file
 alembic/                    Database migrations
 scripts/                    Database/bootstrap utilities and local dev runner
+docs/                       Original product brief
 tests/                      Automated pytest suite (disposable PostgreSQL database)
+PRODUCTION.md               Production launch gates and known limitations
 .github/workflows/          GitHub Actions CI
 Dockerfile                  Production-style API image
 docker-compose.yml          API + PostgreSQL stack
@@ -414,6 +418,8 @@ LiveKit may log `event loop blocked` warnings while resampling or running model 
 The development secret is only `secret`. LiveKit still starts, but any shared or production deployment should use a 32+ character secret in both `.env` and `voice/livekit-config.yaml`.
 
 ## Security notes
+
+NEXA is not safe to expose to the public internet without completing the launch gates in [`PRODUCTION.md`](PRODUCTION.md).
 
 - Never commit `.env`.
 - Change `JWT_SECRET_KEY` and the LiveKit API secret before sharing the app.

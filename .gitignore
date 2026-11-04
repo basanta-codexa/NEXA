@@ -6,9 +6,9 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 
-# Local-only ad-hoc probes at the repo root.
-# Committed tests belong in tests/.
+# Local-only ad-hoc probes, not the automated test suite
 /test_*.py
+scripts/local_probes/
 
 # Downloaded voice models and runtime artifacts
 voice_models/

@@ -1,0 +1,53 @@
+Phase 1 — Product + Architecture
+
+Understand exactly what we're building.
+
+Phase 2 — Backend
+
+FastAPI + PostgreSQL + authentication.
+
+Phase 3 — Multi-tenancy
+
+Tenant isolation + users + agents.
+
+Phase 4 — Agent Engine
+
+LLM + prompts + structured configuration.
+
+Phase 5 — Tool System
+
+Dynamic tool registry.
+
+Phase 6 — RAG
+
+Documents → embeddings → retrieval → citations.
+
+Phase 7 — Voice
+
+LiveKit + STT + turn detection + TTS.
+
+Phase 8 — Memory
+
+Short-term + long-term memory.
+
+Phase 9 — Evaluation
+
+Automated AI testing.
+
+Phase 10 — Observability
+
+Logs + traces + metrics.
+
+Phase 11 — Security
+
+RBAC + API keys + rate limiting + tenant isolation.
+
+Phase 12 — Docker + AWS
+
+Deploy the entire thing.
+
+Phase 13 — AI Employee Swarm
+
+Our "WOOOO" feature. 😈
+
+Phase 14 — Resume/GitHub
