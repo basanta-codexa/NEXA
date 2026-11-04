@@ -28,6 +28,7 @@ LiveKit server (:7880) <----> Voice worker
 ## Features
 
 - Tenants, users, roles, and permissions
+- Dedicated action permissions: `agent:run` for LLM runs and `voice:start` for voice sessions
 - Agent CRUD, activation, and text runs
 - Tool calling with a provider-agnostic agent loop
 - Conversation memory
@@ -264,7 +265,7 @@ Or create a database named `nexa` in pgAdmin. If `psql` is not on your `PATH`, u
 .\venv\Scripts\python.exe -m scripts.seed_rbac
 ```
 
-New tenants seed their own roles automatically. `seed_rbac` is mainly useful for tenants created before RBAC seeding was added.
+New tenants seed their own roles automatically. `seed_rbac` is mainly useful for existing tenants or deployments that add new permissions. It is safe to re-run and is part of the Docker startup command.
 
 For a quick local bootstrap, the following is also available, but Alembic is preferred:
 

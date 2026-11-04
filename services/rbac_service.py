@@ -24,6 +24,8 @@ PERMISSION_DESCRIPTIONS = {
     Permissions.AGENT_CREATE: "Create agents",
     Permissions.AGENT_UPDATE: "Update agents and lifecycle status",
     Permissions.AGENT_DELETE: "Delete agents",
+    Permissions.AGENT_RUN: "Run agents and consume LLM tokens",
+    Permissions.VOICE_START: "Start LiveKit voice sessions",
     Permissions.USER_READ: "View users in the tenant",
     Permissions.USER_CREATE: "Invite/create users",
     Permissions.USER_UPDATE: "Update users",

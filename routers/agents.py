@@ -123,7 +123,7 @@ def run_agent(
     db=Depends(get_db),
     tenant_id: int = Depends(get_current_tenant_id),
     current_user=Depends(
-        require_permission(Permissions.AGENT_READ)
+        require_permission(Permissions.AGENT_RUN)
     )
 ):
     result = run_agent_engine_service(

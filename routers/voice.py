@@ -82,7 +82,7 @@ def start_voice_session(
     agent_id: int,
     body: VoiceSessionRequest,
     db: Session = Depends(get_db),
-    current_user=Depends(require_permission(Permissions.AGENT_READ)),
+    current_user=Depends(require_permission(Permissions.VOICE_START)),
     tenant_id: int = Depends(get_current_tenant_id),
 ):
     """
