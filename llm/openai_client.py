@@ -79,8 +79,28 @@ def from_openai_message(message: Any) -> dict[str, Any]:
     }
 
 
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
 class OpenAIClient(LLMClient):
-    """OpenAI chat-completions client with tool calling and generation params."""
+    """
+    OpenAI-compatible chat-completions client.
+
+    Used for OpenAI itself and for providers that expose an OpenAI-compatible
+    API (for example Groq and xAI). Provider-specific routing is handled by
+    the factory; this class handles key, base URL, timeout, and retry config.
+    """
 
     def __init__(
         self,
@@ -89,6 +109,11 @@ class OpenAIClient(LLMClient):
         temperature: float | None = None,
         max_tokens: int | None = None,
         top_p: float | None = None,
+        base_url: str | None = None,
+        api_key_env: str = "OPENAI_API_KEY",
+        provider_name: str = "OpenAI",
+        timeout: float | None = None,
+        max_retries: int | None = None,
     ):
         super().__init__(
             model_name,
@@ -96,16 +121,42 @@ class OpenAIClient(LLMClient):
             max_tokens=max_tokens,
             top_p=top_p,
         )
+        if not model_name or not model_name.strip():
+            raise ValueError("model_name must not be empty.")
+
         self._client: OpenAI | None = None
+        self._base_url = base_url
+        self._api_key_env = api_key_env
+        self._provider_name = provider_name
+        self._timeout = (
+            timeout if timeout is not None else _env_float("LLM_TIMEOUT_SECONDS", 60.0)
+        )
+        self._max_retries = (
+            max_retries
+            if max_retries is not None
+            else _env_int("LLM_MAX_RETRIES", 2)
+        )
 
     @property
     def client(self) -> OpenAI:
         # Lazy so importing/creating the client never fails without a key.
         if self._client is None:
-            api_key = os.getenv("OPENAI_API_KEY")
+            api_key = os.getenv(self._api_key_env)
             if not api_key:
-                raise RuntimeError("OPENAI_API_KEY is not set.")
-            self._client = OpenAI(api_key=api_key)
+                raise RuntimeError(f"{self._api_key_env} is not set.")
+
+            client_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": self._timeout,
+                "max_retries": self._max_retries,
+            }
+            base_url = self._base_url
+            if base_url is None and self._api_key_env == "OPENAI_API_KEY":
+                base_url = os.getenv("OPENAI_BASE_URL")
+            if base_url:
+                client_kwargs["base_url"] = base_url
+
+            self._client = OpenAI(**client_kwargs)
         return self._client
 
     def generate(
@@ -142,9 +193,16 @@ class OpenAIClient(LLMClient):
 
         try:
             completion = self.client.chat.completions.create(**payload)
+        except RuntimeError:
+            # Configuration/setup errors should keep their specific message.
+            raise
         except Exception as exc:
-            logger.exception("OpenAI request failed for model %s", self.model_name)
-            raise RuntimeError(f"OpenAI request failed: {exc}") from exc
+            logger.exception(
+                "%s request failed for model %s",
+                self._provider_name,
+                self.model_name,
+            )
+            raise RuntimeError(f"{self._provider_name} request failed: {exc}") from exc
 
         choice = completion.choices[0]
         result = from_openai_message(choice.message)

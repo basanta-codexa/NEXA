@@ -21,7 +21,7 @@ LiveKit server (:7880) <----> Voice worker
                                   |
                                   +-- Silero VAD
                                   +-- faster-whisper STT
-                                  +-- agent engine (Ollama/OpenAI/fake)
+                                  +-- agent engine (Ollama/OpenAI/Grok/Groq/fake)
                                   +-- Piper TTS
 ```
 
@@ -44,7 +44,7 @@ main.py                     FastAPI application and health endpoints
 routers/                    HTTP endpoints
 services/                   Business logic and tenant/RBAC services
 engine/                     Agent execution loop
-llm/                        OpenAI, Ollama, and fake LLM clients
+llm/                        Ollama, OpenAI, Groq, xAI/Grok, fake LLM clients
 rag/                        Retrieval and document processing
 voice/                      LiveKit worker, STT/TTS, demo, compose file
 alembic/                    Database migrations
@@ -54,7 +54,8 @@ tests/                      Automated pytest suite (disposable PostgreSQL databa
 PRODUCTION.md               Production launch gates and known limitations
 .github/workflows/          GitHub Actions CI
 Dockerfile                  Production-style API image
-docker-compose.yml          API + PostgreSQL stack
+docker-compose.dev.yml     Local API + PostgreSQL development stack
+docker-compose.yml          Production API + PostgreSQL template (requires real secrets)
 ```
 
 ## Prerequisites
@@ -63,6 +64,7 @@ docker-compose.yml          API + PostgreSQL stack
 - PostgreSQL 15+
 - Docker Desktop (for the local LiveKit server)
 - Ollama (only for `ollama/*` models)
+- API keys for OpenAI-compatible providers, if used: `OPENAI_API_KEY`, `GROQ_API_KEY`, or `XAI_API_KEY`
 
 Tested with Python 3.14.1, PostgreSQL 18, Docker Desktop, and Ollama.
 
@@ -229,6 +231,22 @@ OLLAMA_HOST=http://localhost:11434
 
 `LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must match `voice/livekit-config.dev.yaml` for local development. The committed values are local-development defaults only and must never be used in production.
 
+### LLM provider configuration
+
+NEXA uses one of these model prefixes:
+
+| Model name | Provider | Required environment variable |
+|---|---|---|
+| `fake` or omitted | Deterministic offline test client | None |
+| `ollama/<model>` | Local Ollama | `OLLAMA_HOST` only |
+| `gpt-*` / `openai/<model>` | OpenAI | `OPENAI_API_KEY` |
+| `groq/<model>` | Groq (OpenAI-compatible) | `GROQ_API_KEY` |
+| `xai/<model>` / `grok/<model>` / `grok-*` | xAI Grok (OpenAI-compatible) | `XAI_API_KEY` |
+
+Optional provider endpoints can be overridden with `OPENAI_BASE_URL`, `GROQ_BASE_URL`, and `XAI_BASE_URL` (useful for compatible proxies or gateways). See `.env.example` for the exact format. `LLM_TIMEOUT_SECONDS` and `LLM_MAX_RETRIES` apply to OpenAI-compatible providers.
+
+Free-tier Groq or Grok keys are suitable for development and staging with synthetic tenants, not as a substitute for production security and quotas. Do not send real customer data through free-tier endpoints.
+
 ### 3. Create the database
 
 Using `psql`:
@@ -377,13 +395,24 @@ Run the suite:
 
 The tests create a disposable PostgreSQL database named `nexa_test_<id>` from the `DB_*` or `DATABASE_URL` settings in `.env`, apply every Alembic migration, run the tests, and drop the database afterward. Your development database (`nexa`) is never touched. The database user needs permission to create databases.
 
-The API tests use `TestClient`, the deterministic `fake` LLM client, and deterministic embeddings, so Ollama, OpenAI, and LiveKit are not required.
+The API tests use `TestClient`, the deterministic `fake` LLM client, and deterministic embeddings, so Ollama, OpenAI, Groq, xAI, and LiveKit are not required.
 
-Optional live Ollama integration test:
+Optional live integration tests:
 
 ```powershell
+# Ollama
 $env:RUN_OLLAMA_TESTS = "1"
 .\venv\Scripts\python.exe -m pytest -m integration
+
+# Groq (requires GROQ_API_KEY and GROQ_TEST_MODEL)
+$env:RUN_GROQ_TESTS = "1"
+$env:GROQ_TEST_MODEL = "llama-3.1-8b-instant"
+.\venv\Scripts\python.exe -m pytest -m integration -k groq
+
+# xAI Grok (requires XAI_API_KEY and XAI_TEST_MODEL)
+$env:RUN_XAI_TESTS = "1"
+$env:XAI_TEST_MODEL = "grok-4"
+.\venv\Scripts\python.exe -m pytest -m integration -k xai
 ```
 
 Lint checks used by CI:
