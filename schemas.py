@@ -60,6 +60,11 @@ class AgentListResponse(BaseModel):
     agents: list[AgentResponse]
 
 
+class CreateSignupInvite(BaseModel):
+    description: str | None = Field(default=None, max_length=255)
+    expires_in_days: int = Field(default=7, ge=0, le=365)
+
+
 class CreateTenant(BaseModel):
     name: str = Field(min_length=1, max_length=100, strip_whitespace=True)
     description: str = Field(default="", max_length=255)

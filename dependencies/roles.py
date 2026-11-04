@@ -11,7 +11,7 @@ def require_roles(*allowed_roles):
         if current_user.role not in allowed_roles:
             raise HTTPException(
                 status_code=403,
-                detail="You do not have permisssion to perform this action"
+                detail="You do not have permission to perform this action"
             )
         return current_user
 

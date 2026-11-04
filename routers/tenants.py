@@ -2,8 +2,11 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from database import get_db
-from schemas import CreateTenant
+from dependencies.roles import require_roles
+from dependencies.permissions import ROLE_ADMIN
+from schemas import CreateTenant, CreateSignupInvite
 from services.tenant_service import create_tenant_service
+from services.signup_invites import create_tenant_invite
 
 router = APIRouter(
     prefix="/tenants",
@@ -36,3 +39,25 @@ def create_tenant(tenant: CreateTenant, db: Session = Depends(get_db)):
         }
 
     return response
+
+
+# Admin-only: create a one-time tenant signup invite. The plaintext code is
+# returned exactly once and never stored.
+@router.post("/invites", status_code=201)
+def create_signup_invite(
+    body: CreateSignupInvite,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(ROLE_ADMIN)),
+):
+    invite, code = create_tenant_invite(
+        db,
+        description=body.description,
+        expires_in_days=None if body.expires_in_days == 0 else body.expires_in_days,
+    )
+
+    return {
+        "message": "Invite created. Store the code now; it will not be shown again.",
+        "invite_code": code,
+        "expires_in_days": None if body.expires_in_days == 0 else body.expires_in_days,
+        "description": invite.description,
+    }

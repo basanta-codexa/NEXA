@@ -13,6 +13,7 @@ load_dotenv()
 
 from database import engine  # noqa: E402
 from routers.agents import router as agents_router  # noqa: E402
+from routers.console import router as console_router  # noqa: E402
 from routers.documents import router as documents_router  # noqa: E402
 from routers.tenants import router as tenants_router  # noqa: E402
 from routers.users import router as users_router  # noqa: E402
@@ -110,6 +111,7 @@ def health():
 
 
 app.include_router(agents_router)
+app.include_router(console_router)
 app.include_router(tenants_router)
 app.include_router(users_router)
 app.include_router(documents_router)
