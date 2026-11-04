@@ -1,0 +1,64 @@
+# Local development stack for NEXA
+# Run with: docker compose -f docker-compose.dev.yml up --build
+#
+# This file intentionally uses convenient development defaults.
+# Do not deploy it to production. For production, use docker-compose.yml.
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: nexa
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+    ports:
+      # Exposed on localhost only for local tooling such as psql/pgAdmin.
+      - "127.0.0.1:${NEXA_DB_PORT:-5433}:5432"
+    volumes:
+      - nexa_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d nexa"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      DB_HOST: db
+      DB_PORT: "5432"
+      DB_NAME: nexa
+      DB_USER: postgres
+      DB_PASSWORD: "${POSTGRES_PASSWORD:-postgres}"
+      JWT_SECRET_KEY: "${JWT_SECRET_KEY:-dev-only-change-this-secret}"
+      JWT_ALGORITHM: HS256
+      JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "60"
+      CORS_ORIGINS: "${CORS_ORIGINS:-*}"
+      LOG_LEVEL: INFO
+      LIVEKIT_URL: "${LIVEKIT_URL:-ws://localhost:7880}"
+      LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:-devkey}"
+      LIVEKIT_API_SECRET: "${LIVEKIT_API_SECRET:-secret}"
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    command: >
+      sh -c "alembic upgrade head &&
+             python -m scripts.seed_rbac &&
+             uvicorn main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+volumes:
+  nexa_pgdata:

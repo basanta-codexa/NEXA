@@ -134,19 +134,61 @@ Start this only when you need voice. LiveKit must be running first.
 | Health check | http://127.0.0.1:8000/health |
 | Voice demo | http://127.0.0.1:5500/voice/demo.html |
 
-## Docker Compose (API + PostgreSQL)
+## Docker Compose
 
-The root `docker-compose.yml` runs PostgreSQL and the API in containers. It applies migrations and seeds RBAC automatically on startup.
+### Local development
+
+The `docker-compose.dev.yml` file keeps convenient local defaults. It runs PostgreSQL and the API in containers and applies migrations and seeds RBAC automatically on startup.
 
 ```powershell
-docker compose up --build
+docker compose -f docker-compose.dev.yml up --build
 ```
 
 Then open http://127.0.0.1:8000/docs.
 
-The database is exposed on host port `5433` by default so it does not conflict with a local PostgreSQL server on `5432`. Override `NEXA_DB_PORT` if needed. Set `JWT_SECRET_KEY`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` in `.env` for anything beyond a local demo.
+The database is exposed on `127.0.0.1:5433` by default so it does not conflict with a local PostgreSQL server on `5432`. Override `NEXA_DB_PORT` if needed.
 
-Stop the stack with `docker compose down`. Add `-v` to also delete the PostgreSQL volume and start fresh.
+Stop the stack with:
+
+```powershell
+docker compose -f docker-compose.dev.yml down
+```
+
+Add `-v` to also delete the PostgreSQL volume and start fresh.
+
+### Production
+
+The root `docker-compose.yml` is production-oriented and contains **no development secrets or automatic fallbacks**. It refuses to start without:
+
+- `POSTGRES_PASSWORD`
+- `JWT_SECRET_KEY`
+- `CORS_ORIGINS`
+- `LIVEKIT_URL`
+- `LIVEKIT_API_KEY`
+- `LIVEKIT_API_SECRET`
+
+Create a local, untracked environment file (never commit it):
+
+```env
+POSTGRES_DB=nexa
+POSTGRES_USER=nexa
+POSTGRES_PASSWORD=replace-with-a-long-random-password
+JWT_SECRET_KEY=replace-with-a-long-random-secret
+CORS_ORIGINS=https://your-production-domain.example.com
+LIVEKIT_URL=wss://your-livekit.example.com
+LIVEKIT_API_KEY=replace-with-production-key
+LIVEKIT_API_SECRET=replace-with-a-long-production-secret
+```
+
+Start production:
+
+```powershell
+docker compose --env-file .env.production up --build
+```
+
+The production API binds to `127.0.0.1:8000` by default; put a TLS-terminating reverse proxy in front of it. Set `APP_BIND_ADDRESS=0.0.0.0` only when the host/network boundary is intentionally controlled. The PostgreSQL port is not published to the host.
+
+For the self-hosted LiveKit server, create `voice/livekit-config.yaml` from `voice/livekit-config.production.example.yaml` and replace every placeholder. Do not use `voice/livekit-config.dev.yaml` or its credentials in production.
 
 ## First-time setup
 
@@ -185,7 +227,7 @@ LIVEKIT_API_SECRET=secret
 OLLAMA_HOST=http://localhost:11434
 ```
 
-`LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must match `voice/livekit-config.yaml`. The committed values are development defaults only.
+`LIVEKIT_API_KEY` and `LIVEKIT_API_SECRET` must match `voice/livekit-config.dev.yaml` for local development. The committed values are local-development defaults only and must never be used in production.
 
 ### 3. Create the database
 
@@ -415,7 +457,7 @@ LiveKit may log `event loop blocked` warnings while resampling or running model 
 
 ### LiveKit logs `secret is too short`
 
-The development secret is only `secret`. LiveKit still starts, but any shared or production deployment should use a 32+ character secret in both `.env` and `voice/livekit-config.yaml`.
+The local development secret is only `secret`. LiveKit still starts, but any shared or production deployment must use a 32+ character secret in both the production environment file and `voice/livekit-config.yaml`.
 
 ## Security notes
 

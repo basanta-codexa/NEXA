@@ -1,5 +1,6 @@
-# LiveKit Server Configuration for NEXA
-# API key and secret must match the values in your .env file
+# LiveKit local development configuration for NEXA.
+# Development-only credentials. Do not use for production.
+# The API key and secret must match the values in your local .env file.
 
 port: 7880
 rtc:

@@ -50,7 +50,7 @@ NEXA may be called production-ready only after all of the following are true:
 - Login has no lockout or end-to-end brute-force protection.
 - Email uniqueness is global rather than per-tenant.
 - JWT has no refresh/revocation workflow.
-- Production compose still ships development defaults unless overridden.
+- Production Compose refuses missing secrets and does not publish PostgreSQL, but a TLS proxy, secret manager, and real deployment validation are still required.
 
 ### Cost and LLM operations
 - LLM usage is not accumulated across all agent iterations in a run.

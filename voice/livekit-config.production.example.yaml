@@ -1,0 +1,20 @@
+# LiveKit production configuration template for NEXA
+# Copy this file to `voice/livekit-config.yaml` and replace every placeholder.
+# Do not commit the completed file with real credentials.
+
+port: 7880
+rtc:
+  port_range_start: 50100
+  port_range_end: 50200
+  tcp_port: 7881
+  use_external_ip: true
+
+# Must exactly match LIVEKIT_API_KEY and LIVEKIT_API_SECRET.
+keys:
+  REPLACE_WITH_LIVEKIT_API_KEY: REPLACE_WITH_LIVEKIT_API_SECRET
+
+log_level: info
+
+room:
+  empty_timeout: 300
+  max_participants: 20

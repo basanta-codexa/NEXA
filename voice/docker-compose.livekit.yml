@@ -1,11 +1,12 @@
-# LiveKit Server — Self-Hosted Configuration
+# LiveKit Server — Local Development Configuration
 # Run with: docker compose -f voice/docker-compose.livekit.yml up -d
 #
-# This starts the LiveKit server on localhost:7880 (WebSocket) and 7881 (TURN/TCP).
-# Use the same API key/secret as in your .env file.
+# This starts the local LiveKit server on localhost:7880 and 7881.
+# It uses development-only credentials in voice/livekit-config.dev.yaml.
+# Do not use this compose file or configuration as your production deployment.
 #
-# Prerequisites: Docker Desktop must be installed and running.
-# Install: https://www.docker.com/products/docker-desktop/
+# For production, create voice/livekit-config.yaml from
+# voice/livekit-config.production.example.yaml and provide real credentials.
 
 services:
   livekit:
@@ -20,7 +21,7 @@ services:
       --config /etc/livekit/config.yaml
       --node-ip=127.0.0.1
     volumes:
-      - ./livekit-config.yaml:/etc/livekit/config.yaml:ro
+      - ./livekit-config.dev.yaml:/etc/livekit/config.yaml:ro
     networks:
       - nexa-voice
 

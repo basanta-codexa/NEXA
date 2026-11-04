@@ -10,6 +10,9 @@ __pycache__/
 /test_*.py
 scripts/local_probes/
 
+# Production LiveKit credentials. The real file is intentionally not committed.
+voice/livekit-config.yaml
+
 # Downloaded voice models and runtime artifacts
 voice_models/
 .dev/
