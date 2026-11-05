@@ -9,8 +9,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-load_dotenv()
+from ratelimit import check_request
 
+load_dotenv()
 from database import engine  # noqa: E402
 from routers.agents import router as agents_router  # noqa: E402
 from routers.console import router as console_router  # noqa: E402
@@ -70,6 +71,66 @@ async def request_logging_middleware(request: Request, call_next):
         duration_ms,
         request_id,
     )
+    return response
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next):
+    client = request.client.host if request.client else "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client = forwarded.split(",")[0].strip()
+
+    result = check_request(request.url.path, request.method, client)
+    if result is not None:
+        allowed, limit, remaining, retry = result
+        if not allowed:
+            logger.warning(
+                "rate_limit_exceeded path=%s client=%s",
+                request.url.path,
+                client,
+            )
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Rate limit exceeded. Try again in {retry} seconds."},
+                headers={
+                    "Retry-After": str(retry),
+                    "X-RateLimit-Limit": str(limit),
+                    "X-RateLimit-Remaining": "0",
+                },
+            )
+
+    response = await call_next(request)
+    if result is not None:
+        response.headers["X-RateLimit-Limit"] = str(result[1])
+        response.headers["X-RateLimit-Remaining"] = str(result[2])
+    return response
+
+
+_DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
+
+
+@app.middleware("http")
+async def security_headers_middleware(request: Request, call_next):
+    response = await call_next(request)
+
+    is_docs = request.url.path.startswith(_DOCS_PATHS)
+    headers = {
+        "X-Content-Type-Options": "nosniff",
+        "X-Frame-Options": "DENY",
+        "Referrer-Policy": "strict-origin-when-cross-origin",
+        "Permissions-Policy": "camera=(), microphone=(), geolocation=()",
+        "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
+        "Content-Security-Policy": (
+            "default-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+            if is_docs else
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+        ),
+    }
+    for header, value in headers.items():
+        response.headers.setdefault(header, value)
     return response
 
 
