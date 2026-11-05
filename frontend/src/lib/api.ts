@@ -127,6 +127,36 @@ export async function registerTenant(input: {
   );
 }
 
+/* ---------- Invites (admin) ---------- */
+export type InviteInfo = {
+  id: number;
+  description: string | null;
+  created_at: string;
+  expires_at: string | null;
+  used_at: string | null;
+  status: "active" | "expired" | "used";
+};
+
+export const listInvites = () =>
+  apiFetch<{ invites: InviteInfo[] }>("/tenants/invites");
+
+export const createInvite = (description: string, expiresInDays: number) =>
+  apiFetch<{
+    message: string;
+    invite_code: string;
+    expires_in_days: number | null;
+    description: string | null;
+  }>("/tenants/invites", {
+    method: "POST",
+    body: JSON.stringify({
+      description: description || null,
+      expires_in_days: expiresInDays,
+    }),
+  });
+
+export const revokeInvite = (id: number) =>
+  apiFetch<{ message: string }>(`/tenants/invites/${id}`, { method: "DELETE" });
+
 /* ---------- Agents ---------- */
 export type Agent = {
   id: number;

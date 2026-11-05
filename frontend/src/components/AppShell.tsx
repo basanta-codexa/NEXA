@@ -11,7 +11,7 @@ import {
   type NexaUser,
 } from "@/lib/api";
 
-function Icon({ name }: { name: "grid" | "agent" | "knowledge" | "team" }) {
+function Icon({ name }: { name: "grid" | "agent" | "knowledge" | "team" | "invite" }) {
   const common = {
     width: 18,
     height: 18,
@@ -47,6 +47,16 @@ function Icon({ name }: { name: "grid" | "agent" | "knowledge" | "team" }) {
       </svg>
     );
   }
+  if (name === "invite") {
+    return (
+      <svg {...common}>
+        <path d="M4 12h13" />
+        <path d="M13 6l6 6-6 6" />
+        <path d="M4 5v14" strokeOpacity="0.5" />
+      </svg>
+    );
+  }
+  // team
   return (
     <svg {...common}>
       <circle cx="9" cy="8" r="3.2" />
@@ -62,6 +72,10 @@ const NAV = [
   { href: "/agents", label: "Agents", icon: "agent" as const },
   { href: "/knowledge", label: "Knowledge", icon: "knowledge" as const },
   { href: "/users", label: "Team", icon: "team" as const },
+];
+
+const ADMIN_NAV = [
+  { href: "/invites", label: "Invites", icon: "invite" as const },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -124,6 +138,20 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
               </Link>
             );
           })}
+          {user?.role === "admin" ? (
+            <>
+              <div className="nav-label">Admin</div>
+              {ADMIN_NAV.map((item) => {
+                const active = pathname?.startsWith(item.href);
+                return (
+                  <Link key={item.href} href={item.href} className={`nav-item${active ? " active" : ""}`}>
+                    <span className="nav-icon"><Icon name={item.icon} /></span>
+                    <span>{item.label}</span>
+                  </Link>
+                );
+              })}
+            </>
+          ) : null}
         </nav>
 
         <div className="sidebar-footer">
