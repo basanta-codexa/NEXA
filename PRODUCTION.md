@@ -46,8 +46,9 @@ NEXA may be called production-ready only after all of the following are true:
 ## Current known limitations
 
 ### Security
-- Tenant signup is invite-only and codes are one-time, but there is still no public rate limiting or bot detection.
-- Login has no lockout or end-to-end brute-force protection.
+- Tenant signup is invite-only and codes are one-time. Login, signup, invite creation, agent runs, and uploads now have in-memory per-client sliding-window rate limits (see `.env.example`); multi-instance deployments still need an edge/Redis-backed limiter.
+- Security headers (nosniff, frame-deny, referrer policy, permissions-policy, HSTS, CSP with a relaxed policy on /docs) are applied to every response.
+- Login still has no lockout or end-to-end brute-force protection beyond rate limiting.
 - Email uniqueness is global rather than per-tenant.
 - JWT has no refresh/revocation workflow.
 - Production Compose refuses missing secrets and does not publish PostgreSQL, but a TLS proxy, secret manager, and real deployment validation are still required.
