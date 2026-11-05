@@ -83,6 +83,48 @@ def consume_tenant_invite(db: Session, invite_code: str) -> TenantSignupInvite:
     return invite
 
 
+def list_invites(db: Session) -> list[dict]:
+    """List every invite with its computed status. Plaintext never appears here."""
+    invites = db.query(TenantSignupInvite).order_by(
+        TenantSignupInvite.created_at.desc()
+    ).all()
+    now = datetime.now(timezone.utc)
+
+    result = []
+    for invite in invites:
+        if invite.used_at is not None:
+            status = "used"
+        elif invite.expires_at is not None and invite.expires_at <= now:
+            status = "expired"
+        else:
+            status = "active"
+        result.append({
+            "id": invite.id,
+            "description": invite.description,
+            "created_at": invite.created_at,
+            "expires_at": invite.expires_at,
+            "used_at": invite.used_at,
+            "status": status,
+        })
+    return result
+
+
+def revoke_invite(db: Session, invite_id: int) -> None:
+    """Delete an unused invite. Refuses to revoke a used one."""
+    invite = db.query(TenantSignupInvite).filter(
+        TenantSignupInvite.id == invite_id
+    ).first()
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found.")
+    if invite.used_at is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="This invite has already been used and cannot be revoked.",
+        )
+    db.delete(invite)
+    db.commit()
+
+
 def _invalid_invite() -> None:
     # Deliberately vague: don't reveal whether a code exists, was used, or expired.
     raise HTTPException(status_code=403, detail="Invalid or already-used invite code.")

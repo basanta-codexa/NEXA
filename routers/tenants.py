@@ -6,7 +6,11 @@ from dependencies.roles import require_roles
 from dependencies.permissions import ROLE_ADMIN
 from schemas import CreateTenant, CreateSignupInvite
 from services.tenant_service import create_tenant_service
-from services.signup_invites import create_tenant_invite
+from services.signup_invites import (
+    create_tenant_invite,
+    list_invites,
+    revoke_invite,
+)
 
 router = APIRouter(
     prefix="/tenants",
@@ -61,3 +65,24 @@ def create_signup_invite(
         "expires_in_days": None if body.expires_in_days == 0 else body.expires_in_days,
         "description": invite.description,
     }
+
+
+# Admin-only: list every invite with its status. Codes are never returned —
+# only hashes are stored, so plaintext invite codes cannot appear here.
+@router.get("/invites")
+def get_signup_invites(
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(ROLE_ADMIN)),
+):
+    return {"invites": list_invites(db)}
+
+
+# Admin-only: revoke an unused invite. Used invites cannot be revoked.
+@router.delete("/invites/{invite_id}")
+def delete_signup_invite(
+    invite_id: int,
+    db: Session = Depends(get_db),
+    current_user=Depends(require_roles(ROLE_ADMIN)),
+):
+    revoke_invite(db, invite_id)
+    return {"message": "Invite revoked."}
