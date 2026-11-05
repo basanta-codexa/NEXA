@@ -145,7 +145,6 @@ export default function KnowledgePage() {
             <div className="muted">Loading…</div>
           ) : docs.length === 0 ? (
             <EmptyState
-              icon="▤"
               title="No documents yet"
               hint="Upload your first document — NEXA will chunk and index it automatically."
             />

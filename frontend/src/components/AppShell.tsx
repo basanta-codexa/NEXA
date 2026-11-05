@@ -11,11 +11,57 @@ import {
   type NexaUser,
 } from "@/lib/api";
 
+function Icon({ name }: { name: "grid" | "agent" | "knowledge" | "team" }) {
+  const common = {
+    width: 18,
+    height: 18,
+    viewBox: "0 0 24 24",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: 1.8,
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+  };
+  if (name === "grid") {
+    return (
+      <svg {...common}>
+        <rect x="3" y="3" width="7.5" height="7.5" rx="1.5" />
+        <rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5" />
+        <rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5" />
+        <rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5" />
+      </svg>
+    );
+  }
+  if (name === "agent") {
+    return (
+      <svg {...common}>
+        <path d="M12 3l2.2 4.9 5.3.4-4 3.3 1.3 5.1L12 14.6 7.2 16.7l1.3-5.1-4-3.3 5.3-.4L12 3z" />
+      </svg>
+    );
+  }
+  if (name === "knowledge") {
+    return (
+      <svg {...common}>
+        <path d="M4 6.5A2.5 2.5 0 016.5 4H20v14.5a1 1 0 01-1 1H6.5A2.5 2.5 0 014 17V6.5z" />
+        <path d="M8 8h8M8 12h5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <circle cx="9" cy="8" r="3.2" />
+      <path d="M3.5 19c.6-3.2 2.8-5 5.5-5s4.9 1.8 5.5 5" />
+      <circle cx="17" cy="9.5" r="2.6" />
+      <path d="M15 14.6c2.2.3 4 2 4.6 4.4" />
+    </svg>
+  );
+}
+
 const NAV = [
-  { href: "/dashboard", label: "Dashboard", icon: "◫" },
-  { href: "/agents", label: "Agents", icon: "◎" },
-  { href: "/knowledge", label: "Knowledge", icon: "▤" },
-  { href: "/users", label: "Users", icon: "👥" },
+  { href: "/dashboard", label: "Dashboard", icon: "grid" as const },
+  { href: "/agents", label: "Agents", icon: "agent" as const },
+  { href: "/knowledge", label: "Knowledge", icon: "knowledge" as const },
+  { href: "/users", label: "Team", icon: "team" as const },
 ];
 
 export default function AppShell({ children }: { children: React.ReactNode }) {
@@ -47,14 +93,14 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     return (
       <div className="auth-wrap">
         <div className="auth-card" style={{ textAlign: "center" }}>
-          <div className="brand-mark" style={{ margin: "0 auto 12px" }}>N</div>
-          <div className="muted">Loading NEXA…</div>
+          <div className="brand-mark" style={{ margin: "0 auto 14px" }}>N</div>
+          <div className="muted">Loading workspace…</div>
         </div>
       </div>
     );
   }
 
-  const initials = user?.email?.charAt(0).toUpperCase() ?? "?";
+  const initial = user?.email?.charAt(0).toUpperCase() ?? "?";
 
   return (
     <div className="app-shell">
@@ -63,7 +109,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           <div className="brand-mark">N</div>
           <div>
             <div className="brand-name">NEXA</div>
-            <div className="brand-sub">AI WORKFORCE</div>
+            <div className="brand-sub">Workforce</div>
           </div>
         </Link>
 
@@ -72,12 +118,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
           {NAV.map((item) => {
             const active = pathname?.startsWith(item.href);
             return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`nav-item${active ? " active" : ""}`}
-              >
-                <span className="nav-icon">{item.icon}</span>
+              <Link key={item.href} href={item.href} className={`nav-item${active ? " active" : ""}`}>
+                <span className="nav-icon"><Icon name={item.icon} /></span>
                 <span>{item.label}</span>
               </Link>
             );
@@ -86,8 +128,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
         <div className="sidebar-footer">
           <div className="user-chip">
-            <div className="avatar">{initials}</div>
-            <div>
+            <div className="avatar">{initial}</div>
+            <div style={{ minWidth: 0 }}>
               <div className="user-role">{user?.role ?? "member"}</div>
               <div className="user-email">{user?.email}</div>
             </div>

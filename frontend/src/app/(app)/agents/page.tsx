@@ -142,7 +142,6 @@ export default function AgentsPage() {
           <div className="muted">Loading agents…</div>
         ) : agents.length === 0 ? (
           <EmptyState
-            icon="◎"
             title="No agents yet"
             hint="Create your first AI agent — it will appear here."
             action={isAdmin ? <button className="btn btn-primary" onClick={openCreate}>+ Create agent</button> : undefined}

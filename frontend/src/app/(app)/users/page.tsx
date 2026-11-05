@@ -70,7 +70,7 @@ export default function UsersPage() {
         {loading ? (
           <div className="muted">Loading team…</div>
         ) : users.length === 0 ? (
-          <EmptyState icon="👥" title="No team members" hint="Invite someone to collaborate on your agents." />
+          <EmptyState title="No team members" hint="Invite someone to collaborate on your agents." />
         ) : (
           <div className="table-wrap">
             <table>
