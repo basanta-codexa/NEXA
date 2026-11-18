@@ -52,6 +52,29 @@ def test_tenant_onboarding_and_login(client, db):
     assert profile.json()["tenant_id"] == body["tenant"]["id"]
 
 
+def test_token_is_bound_to_its_issuing_tenant(client, tenant, tenant_factory):
+    other = tenant_factory("other")
+
+    from auth import create_access_token
+
+    forged = create_access_token(
+        user_id=tenant["admin_id"],
+        tenant_id=other["id"],
+    )
+
+    rejected = client.get(
+        "/users/me",
+        headers={"Authorization": f"Bearer {forged}"},
+    )
+    assert rejected.status_code == 401
+    assert rejected.json()["detail"] == "Token is not valid for this tenant."
+
+    # A correctly scoped token for the same user must still work.
+    legitimate = client.get("/users/me", headers=tenant["headers"])
+    assert legitimate.status_code == 200
+    assert legitimate.json()["tenant_id"] == tenant["id"]
+
+
 def test_login_is_email_case_insensitive(client, tenant):
     response = client.post(
         "/users/login",
