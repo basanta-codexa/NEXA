@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
-from ratelimit import check_request
+from ratelimit import check_request, resolve_client_key
 
 load_dotenv()
 from database import engine  # noqa: E402
@@ -76,10 +76,10 @@ async def request_logging_middleware(request: Request, call_next):
 
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
-    client = request.client.host if request.client else "unknown"
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client = forwarded.split(",")[0].strip()
+    client = resolve_client_key(
+        request.client.host if request.client else None,
+        request.headers.get("x-forwarded-for"),
+    )
 
     result = check_request(request.url.path, request.method, client)
     if result is not None:

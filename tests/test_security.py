@@ -70,6 +70,47 @@ def test_rate_limits_disabled_by_default(client):
         assert response.status_code != 429
 
 
+def test_forwarded_header_is_ignored_from_untrusted_client(monkeypatch):
+    from ratelimit import resolve_client_key
+
+    monkeypatch.setenv("TRUSTED_PROXY_HOSTS", "10.0.0.0/8")
+
+    assert resolve_client_key("203.0.113.5", "1.2.3.4") == "203.0.113.5"
+    assert resolve_client_key(None, "1.2.3.4") == "unknown"
+
+
+def test_forwarded_header_is_used_from_trusted_proxy(monkeypatch):
+    from ratelimit import resolve_client_key
+
+    monkeypatch.setenv("TRUSTED_PROXY_HOSTS", "10.0.0.0/8")
+
+    assert resolve_client_key("10.0.0.1", "203.0.113.9, 10.0.0.1") == "203.0.113.9"
+
+
+def test_spoofed_forwarded_header_cannot_bypass_login_limit(client, monkeypatch):
+    monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
+    monkeypatch.setenv("RATE_LIMIT_LOGIN_PER_MINUTE", "1")
+    monkeypatch.setenv("TRUSTED_PROXY_HOSTS", "10.0.0.0/8")
+
+    body = {"email": "spoof@example.com", "password": "wrong"}
+    client.post("/users/login", json=body, headers={"X-Forwarded-For": "1.1.1.1"})
+    response = client.post(
+        "/users/login", json=body, headers={"X-Forwarded-For": "2.2.2.2"}
+    )
+
+    assert response.status_code == 429
+
+
+def test_limiter_bounds_memory():
+    from ratelimit import SlidingWindowLimiter
+
+    limiter = SlidingWindowLimiter(max_entries=3)
+    for index in range(10):
+        limiter.check(f"client-{index}", 5, 60)
+
+    assert len(limiter._buckets) <= 3
+
+
 def test_429_carries_ratelimit_headers(client, monkeypatch):
     monkeypatch.setenv("RATE_LIMIT_ENABLED", "true")
     monkeypatch.setenv("RATE_LIMIT_SIGNUP_PER_HOUR", "1")
