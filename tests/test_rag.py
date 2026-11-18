@@ -186,15 +186,15 @@ def test_failed_ingestion_leaves_no_document(tenant, db):
 def test_embedding_provider_selection(monkeypatch):
     from rag.embeddings import (
         DeterministicEmbeddingClient,
+        FastEmbedClient,
         OllamaEmbeddingClient,
         create_embedding_client,
     )
 
-    monkeypatch.delenv("OLLAMA_HOST", raising=False)
     monkeypatch.setenv("EMBEDDING_PROVIDER", "auto")
-    assert isinstance(create_embedding_client(), DeterministicEmbeddingClient)
+    assert isinstance(create_embedding_client(), FastEmbedClient)
 
-    monkeypatch.setenv("OLLAMA_HOST", "http://localhost:11434")
+    monkeypatch.setenv("EMBEDDING_PROVIDER", "ollama")
     assert isinstance(create_embedding_client(), OllamaEmbeddingClient)
 
     monkeypatch.setenv("EMBEDDING_PROVIDER", "deterministic")

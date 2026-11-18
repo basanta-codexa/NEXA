@@ -142,6 +142,33 @@ class DeterministicEmbeddingClient(BaseEmbeddingClient):
         return vec
 
 
+class FastEmbedClient(BaseEmbeddingClient):
+    """In-process ONNX embeddings. Free, local, and far faster than a server call."""
+
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        self.model_name = model_name
+        self._model = None
+
+    def _load_model(self):
+        if self._model is None:
+            try:
+                from fastembed import TextEmbedding
+            except ImportError as exc:
+                raise RuntimeError(
+                    "fastembed is not installed. Run: pip install fastembed"
+                ) from exc
+            self._model = TextEmbedding(model_name=self.model_name)
+        return self._model
+
+    def embed(self, text: str) -> list[float]:
+        return list(self._load_model().embed([text]))[0].tolist()
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        if not texts:
+            return []
+        return [vector.tolist() for vector in self._load_model().embed(texts)]
+
+
 class OllamaEmbeddingClient(BaseEmbeddingClient):
     """
     Zero-cost local embeddings powered by local Ollama instance
@@ -198,11 +225,10 @@ def create_embedding_client(provider_or_model: str | None = None) -> BaseEmbeddi
         return OllamaEmbeddingClient(model_name=choice.split(":", 1)[1])
     if choice == "ollama":
         return OllamaEmbeddingClient()
+    if choice in {"fastembed", "onnx"}:
+        return FastEmbedClient()
     if choice in {"deterministic", "none"}:
         return DeterministicEmbeddingClient()
     if choice == "auto":
-        # A configured Ollama host means the free local model is available.
-        if os.getenv("OLLAMA_HOST"):
-            return OllamaEmbeddingClient()
-        return DeterministicEmbeddingClient()
+        return FastEmbedClient()
     return DeterministicEmbeddingClient()
