@@ -1,8 +1,8 @@
-import math
 import hashlib
+import math
 import re
 from abc import ABC, abstractmethod
-from typing import Any
+
 import requests
 
 SYNONYMS: dict[str, set[str]] = {
@@ -25,7 +25,7 @@ def cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
     if not vec_a or not vec_b or len(vec_a) != len(vec_b):
         return 0.0
 
-    dot_product = sum(a * b for a, b in zip(vec_a, vec_b))
+    dot_product = sum(a * b for a, b in zip(vec_a, vec_b, strict=True))
     norm_a = math.sqrt(sum(a * a for a in vec_a))
     norm_b = math.sqrt(sum(b * b for b in vec_b))
 
@@ -164,7 +164,30 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
             data = response.json()
             return data.get("embedding", [])
         except Exception as exc:
-            raise RuntimeError(f"Ollama embedding failed for model '{self.model_name}': {exc}")
+            raise RuntimeError(
+                f"Ollama embedding failed for model '{self.model_name}': {exc}"
+            ) from exc
+
+    def embed_batch(self, texts: list[str]) -> list[list[float]]:
+        """Use Ollama's batch endpoint; fall back to one call per text."""
+        try:
+            response = requests.post(
+                f"{self.host}/api/embed",
+                json={"model": self.model_name, "input": texts},
+                timeout=60,
+            )
+            response.raise_for_status()
+            embeddings = response.json().get("embeddings")
+            if embeddings:
+                return embeddings
+        except requests.exceptions.HTTPError:
+            # Older Ollama versions only expose /api/embeddings.
+            pass
+        except requests.exceptions.RequestException as exc:
+            raise RuntimeError(
+                f"Ollama batch embedding failed for model '{self.model_name}': {exc}"
+            ) from exc
+        return [self.embed(text) for text in texts]
 
 
 def create_embedding_client(provider_or_model: str = "auto") -> BaseEmbeddingClient:

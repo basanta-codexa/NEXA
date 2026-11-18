@@ -1,10 +1,12 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
+
 from sqlalchemy.orm import Session
+
 from models import Document, DocumentChunk
-from rag.text_splitter import split_text
+from rag.embeddings import BaseEmbeddingClient, compute_hybrid_score, create_embedding_client
 from rag.file_parser import extract_text_from_file
-from rag.embeddings import create_embedding_client, compute_hybrid_score, BaseEmbeddingClient
+from rag.text_splitter import split_text
 
 
 def create_document_service(
@@ -21,37 +23,45 @@ def create_document_service(
     if embedding_client is None:
         embedding_client = create_embedding_client()
 
-    # 1. Create parent Document
+    chunk_texts = split_text(content, chunk_size=500, chunk_overlap=50)
+    # Include the title in each embedding so title keywords are searchable.
+    enriched = [f"Title: {title}\nContent:\n{text}" for text in chunk_texts]
+    embeddings = embedding_client.embed_batch(enriched)
+
+    now = datetime.now(UTC)
     document = Document(
         tenant_id=tenant_id,
         title=title,
         content=content,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc)
+        created_at=now,
+        updated_at=now,
     )
-    db.add(document)
-    db.commit()
-    db.refresh(document)
 
-    # 2. Chunk text
-    chunks = split_text(content, chunk_size=500, chunk_overlap=50)
-
-    # 3. Embed & persist chunks (enriching embedding input with title so title keywords are indexed)
-    for idx, chunk_text in enumerate(chunks):
-        enrich_text = f"Title: {title}\nContent:\n{chunk_text}"
-        embedding = embedding_client.embed(enrich_text)
-        chunk = DocumentChunk(
-            document_id=document.id,
-            tenant_id=tenant_id,
-            chunk_index=idx,
-            content=chunk_text,
-            embedding=embedding,
-            created_at=datetime.now(timezone.utc)
+    try:
+        # One transaction: a failed commit or embedding leaves no orphan document.
+        db.add(document)
+        db.flush()
+        db.add_all(
+            [
+                DocumentChunk(
+                    document_id=document.id,
+                    tenant_id=tenant_id,
+                    chunk_index=index,
+                    content=text,
+                    embedding=embedding,
+                    created_at=now,
+                )
+                for index, (text, embedding) in enumerate(
+                    zip(chunk_texts, embeddings, strict=True)
+                )
+            ]
         )
-        db.add(chunk)
+        db.commit()
+        db.refresh(document)
+    except Exception:
+        db.rollback()
+        raise
 
-    db.commit()
-    db.refresh(document)
     return document
 
 
