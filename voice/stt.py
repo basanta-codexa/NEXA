@@ -10,8 +10,6 @@ import logging
 import os
 import wave
 
-import numpy as np
-
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +62,8 @@ class WhisperSTT:
 
     def transcribe_bytes(self, audio_bytes: bytes, sample_rate: int = 16000) -> str:
         """Transcribe raw 16-bit signed mono PCM bytes."""
+        import numpy as np
+
         model = self._load_model()
 
         audio_array = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0

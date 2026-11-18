@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import numpy as np
+import pytest
 
 from voice.stt import WhisperSTT
 
@@ -30,11 +30,13 @@ def _assert_low_latency_options(kwargs: dict | None) -> None:
 
 
 def test_transcribe_bytes_uses_low_latency_options():
+    pytest.importorskip("numpy", exc_type=ImportError)
     stt = WhisperSTT()
     fake = _FakeWhisperModel()
     stt._model = fake
 
-    pcm = np.zeros(1600, dtype=np.int16).tobytes()  # 100 ms of silence at 16 kHz
+    # 100 ms of silence at 16 kHz (numpy is imported lazily by the STT client).
+    pcm = b"\x00" * 3200
 
     assert stt.transcribe_bytes(pcm, sample_rate=16000) == ""
     _assert_low_latency_options(fake.call_kwargs)
@@ -59,7 +61,11 @@ class _FakeEOT:
 
 
 def test_eot_predicts_on_only_the_audio_tail():
+    np = pytest.importorskip("numpy")
     from voice import worker
+
+    if not worker.EOT_MAX_SAMPLES:
+        pytest.skip("local EOT inference is not installed")
 
     fake = _FakeEOT()
     pcm = np.arange(30000, dtype=np.int16).tobytes()

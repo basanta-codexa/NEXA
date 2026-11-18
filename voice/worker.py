@@ -41,8 +41,6 @@ except ImportError:  # local inference extra not installed
     EOT_MAX_SAMPLES = 0
     init_eot = None
 
-import numpy as np
-
 logger = logging.getLogger("nexa.voice.worker")
 
 VAD_SAMPLE_RATE = 16000
@@ -60,6 +58,8 @@ def _env_float(name: str, default: float) -> float:
 
 def _predict_end_of_turn(detector, pcm: bytes) -> float:
     """P(turn ended) for the tail of an utterance. Called in a worker thread."""
+    import numpy as np
+
     audio = np.frombuffer(pcm, dtype=np.int16)
     tail = audio[-EOT_MAX_SAMPLES:] if EOT_MAX_SAMPLES else audio
     return float(detector.predict(tail))
