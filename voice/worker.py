@@ -20,6 +20,7 @@ import io
 import logging
 import os
 import sys
+import time
 import wave
 
 # LiveKit registers plugins (and checks the thread) at import time. Import the
@@ -32,11 +33,63 @@ except ImportError:  # voice extras not installed
     VADEventType = None
     silero = None
 
+try:
+    # Native, local end-of-turn model shipped with livekit-local-inference.
+    from livekit.local_inference import EOT, EOT_MAX_SAMPLES, init_eot
+except ImportError:  # local inference extra not installed
+    EOT = None
+    EOT_MAX_SAMPLES = 0
+    init_eot = None
+
+import numpy as np
+
 logger = logging.getLogger("nexa.voice.worker")
 
 VAD_SAMPLE_RATE = 16000
 OUTPUT_SAMPLE_RATE = 48000
 MIN_SPEECH_BYTES = VAD_SAMPLE_RATE * 2 * 0.15  # ignore <150ms blips
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _predict_end_of_turn(detector, pcm: bytes) -> float:
+    """P(turn ended) for the tail of an utterance. Called in a worker thread."""
+    audio = np.frombuffer(pcm, dtype=np.int16)
+    tail = audio[-EOT_MAX_SAMPLES:] if EOT_MAX_SAMPLES else audio
+    return float(detector.predict(tail))
+
+
+def _should_wait_for_more_speech(
+    probability: float, threshold: float, waited: float, max_wait: float
+) -> bool:
+    """True when EOT says the user is still speaking and we have time to wait."""
+    return probability < threshold and waited < max_wait
+
+
+async def _warmup_models() -> None:
+    """Load models before the first call so a user never pays cold-start cost."""
+    from voice.stt import get_stt
+    from voice.tts import get_tts
+
+    started_at = time.perf_counter()
+    await asyncio.to_thread(get_tts().warmup)
+    await asyncio.to_thread(get_stt().warmup)
+    if (
+        EOT is not None
+        and init_eot is not None
+        and os.getenv("VAD_EOT_ENABLED", "true").strip().lower() in _TRUTHY
+    ):
+        await asyncio.to_thread(init_eot)
+    logger.info(
+        "[Voice] models warmed in %s ms",
+        round((time.perf_counter() - started_at) * 1000, 1),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -98,40 +151,62 @@ class AudioPublisher:
         )
         logger.info("[Voice] Published output audio track.")
 
-    async def play(self, wav_bytes: bytes) -> None:
-        """Play WAV bytes, interrupting any previous playback."""
+    async def _push_pcm(
+        self, pcm: bytes, sample_rate: int, generation: int
+    ) -> None:
+        """Push resampled PCM into the track in 20 ms frames."""
         from livekit import rtc
 
+        pcm = _resample_pcm(pcm, sample_rate, OUTPUT_SAMPLE_RATE)
+
+        samples_per_chunk = int(OUTPUT_SAMPLE_RATE * 0.02)  # 20ms
+        chunk_size = samples_per_chunk * 2  # 16-bit mono
+
+        for offset in range(0, len(pcm), chunk_size):
+            if generation != self._generation:
+                logger.debug("[Voice] Playback interrupted.")
+                return
+
+            chunk = pcm[offset:offset + chunk_size]
+            if len(chunk) < chunk_size:
+                chunk = chunk.ljust(chunk_size, b"\x00")
+
+            frame = rtc.AudioFrame(
+                data=chunk,
+                sample_rate=OUTPUT_SAMPLE_RATE,
+                num_channels=1,
+                samples_per_channel=samples_per_chunk,
+            )
+            await self._source.capture_frame(frame)
+
+    async def play(self, wav_bytes: bytes) -> None:
+        """Play WAV bytes, interrupting any previous playback."""
         pcm, sample_rate, channels = _read_wav(wav_bytes)
         if channels != 1:
             raise ValueError("TTS output must be mono.")
-        pcm = _resample_pcm(pcm, sample_rate, OUTPUT_SAMPLE_RATE)
 
         async with self._lock:
             await self._ensure_started()
             generation = self._generation
+            await self._push_pcm(pcm, sample_rate, generation)
+            if generation == self._generation:
+                await self._source.wait_for_playout()
 
-            samples_per_chunk = int(OUTPUT_SAMPLE_RATE * 0.02)  # 20ms
-            chunk_size = samples_per_chunk * 2  # 16-bit mono
+    async def play_stream(self, chunks) -> None:
+        """Play (PCM, sample_rate) chunks as they arrive, without gaps.
 
-            for offset in range(0, len(pcm), chunk_size):
+        Unlike play(), each chunk is pushed immediately; the single
+        wait_for_playout() at the end avoids dead air between sentences.
+        """
+        async with self._lock:
+            await self._ensure_started()
+            generation = self._generation
+            async for pcm, sample_rate in chunks:
                 if generation != self._generation:
-                    logger.debug("[Voice] Playback interrupted.")
                     return
-
-                chunk = pcm[offset:offset + chunk_size]
-                if len(chunk) < chunk_size:
-                    chunk = chunk.ljust(chunk_size, b"\x00")
-
-                frame = rtc.AudioFrame(
-                    data=chunk,
-                    sample_rate=OUTPUT_SAMPLE_RATE,
-                    num_channels=1,
-                    samples_per_channel=samples_per_chunk,
-                )
-                await self._source.capture_frame(frame)
-
-            await self._source.wait_for_playout()
+                await self._push_pcm(pcm, sample_rate, generation)
+            if generation == self._generation:
+                await self._source.wait_for_playout()
 
     def interrupt(self) -> None:
         """Stop playback immediately (barge-in)."""
@@ -162,7 +237,7 @@ async def _listen_to_participant(
 ) -> None:
     from livekit import rtc
 
-    from voice.pipeline import run_voice_turn
+    from voice.pipeline import run_voice_turn_stream
 
     if silero is None or VADEventType is None:
         raise RuntimeError(
@@ -171,7 +246,7 @@ async def _listen_to_participant(
         )
 
     vad = silero.VAD.load(
-        min_silence_duration=float(os.getenv("VAD_MIN_SILENCE_SECONDS", "0.55")),
+        min_silence_duration=float(os.getenv("VAD_MIN_SILENCE_SECONDS", "0.25")),
         activation_threshold=float(os.getenv("VAD_ACTIVATION_THRESHOLD", "0.5")),
     )
     vad_stream = vad.stream()
@@ -192,12 +267,92 @@ async def _listen_to_participant(
         finally:
             vad_stream.end_input()
 
+    eot_enabled = (
+        EOT is not None
+        and os.getenv("VAD_EOT_ENABLED", "true").strip().lower() in _TRUTHY
+    )
+    eot_threshold = _env_float("VAD_EOT_THRESHOLD", 0.2)
+    eot_max_wait = _env_float("VAD_EOT_MAX_WAIT_SECONDS", 0.8)
+    # Model init can load ~100 MB; keep it off the event loop.
+    eot_detector = await asyncio.to_thread(EOT) if eot_enabled else None
+
+    pending = bytearray()
+    pending_started_at: float | None = None
+    pending_generation = 0
+    watchdog: asyncio.Task | None = None
+    active_turn_task: asyncio.Task | None = None
+
+    async def commit_utterance() -> None:
+        nonlocal pending, pending_started_at, pending_generation
+        nonlocal watchdog, active_turn_task
+        if not pending:
+            return
+        utterance = bytes(pending)
+        pending.clear()
+        pending_started_at = None
+        pending_generation += 1
+        if (
+            watchdog is not None
+            and not watchdog.done()
+            and asyncio.current_task() is not watchdog
+        ):
+            watchdog.cancel()
+
+        turn_requested_at = time.perf_counter()
+        logger.info(
+            "[Voice] Speech from %s (%.2fs)",
+            participant_identity,
+            len(utterance) / 2 / VAD_SAMPLE_RATE,
+        )
+        first_audio_ms: float | None = None
+
+        async def audio_with_timing():
+            nonlocal first_audio_ms
+            async for audio_chunk in run_voice_turn_stream(
+                utterance, VAD_SAMPLE_RATE, context
+            ):
+                if first_audio_ms is None:
+                    first_audio_ms = round(
+                        (time.perf_counter() - turn_requested_at) * 1000, 1
+                    )
+                yield audio_chunk
+
+        async def play_turn() -> None:
+            await publisher.play_stream(audio_with_timing())
+            logger.info(
+                "[Voice] speech_end_to_first_audio_ms=%s speech_end_to_response_ms=%s",
+                first_audio_ms,
+                round((time.perf_counter() - turn_requested_at) * 1000, 1),
+            )
+
+        task = asyncio.create_task(play_turn())
+        active_turn_task = task
+        try:
+            await task
+        except asyncio.CancelledError:
+            logger.info("[Voice] Turn cancelled for %s", participant_identity)
+        except Exception:
+            logger.exception("[Voice] Turn failed for %s", participant_identity)
+        finally:
+            if active_turn_task is task:
+                active_turn_task = None
+
+    async def force_commit(generation: int, deadline: float) -> None:
+        remaining = deadline - time.perf_counter()
+        if remaining > 0:
+            await asyncio.sleep(remaining)
+        if generation == pending_generation and pending:
+            logger.info("[Voice] EOT max wait reached — committing pending speech.")
+            await commit_utterance()
+
     feed_task = asyncio.create_task(feed_vad())
 
     try:
         async for event in vad_stream:
             if event.type == VADEventType.START_OF_SPEECH:
                 publisher.interrupt()
+                if active_turn_task is not None and not active_turn_task.done():
+                    active_turn_task.cancel()
                 continue
 
             if event.type != VADEventType.END_OF_SPEECH:
@@ -205,29 +360,54 @@ async def _listen_to_participant(
 
             frames = event.frames or []
             pcm = b"".join(bytes(frame.data) for frame in frames)
-            if len(pcm) < MIN_SPEECH_BYTES:
+            if not pcm:
                 continue
 
-            logger.info("[Voice] Speech from %s (%.2fs)", participant_identity, len(pcm) / 2 / VAD_SAMPLE_RATE)
+            if not pending:
+                pending_started_at = time.perf_counter()
+                pending_generation += 1
+            pending.extend(pcm)
 
-            try:
-                result = await asyncio.to_thread(
-                    run_voice_turn, pcm, VAD_SAMPLE_RATE, context
+            if len(pending) < MIN_SPEECH_BYTES:
+                continue
+
+            if eot_detector is not None and pending_started_at is not None:
+                probability = await asyncio.to_thread(
+                    _predict_end_of_turn, eot_detector, bytes(pending)
                 )
-            except Exception:
-                logger.exception("[Voice] Turn failed for %s", participant_identity)
-                continue
+                waited = time.perf_counter() - pending_started_at
+                logger.info(
+                    "[Voice] EOT verdict probability=%.3f threshold=%.3f pending_ms=%s",
+                    probability,
+                    eot_threshold,
+                    round(waited * 1000, 1),
+                )
+                if _should_wait_for_more_speech(
+                    probability, eot_threshold, waited, eot_max_wait
+                ):
+                    # The model thinks the user is still speaking. Keep the
+                    # audio and wait for the next utterance, with a hard
+                    # deadline so silence can never strand a turn forever.
+                    if watchdog is not None and not watchdog.done():
+                        watchdog.cancel()
+                    watchdog = asyncio.create_task(
+                        force_commit(
+                            pending_generation, pending_started_at + eot_max_wait
+                        )
+                    )
+                    continue
 
-            if result is None:
-                continue
-
-            await publisher.play(result.wav_bytes)
+            await commit_utterance()
 
     except asyncio.CancelledError:
         raise
     except Exception:
         logger.exception("[Voice] Listener crashed for %s", participant_identity)
     finally:
+        if active_turn_task is not None and not active_turn_task.done():
+            active_turn_task.cancel()
+        if watchdog is not None and not watchdog.done():
+            watchdog.cancel()
         feed_task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await feed_task
@@ -249,6 +429,8 @@ async def entrypoint(ctx) -> None:
 
     from voice.context import resolve_room_context
     from voice.room_manager import get_room_manager
+
+    await _warmup_models()
 
     room = ctx.room
     await ctx.connect()
