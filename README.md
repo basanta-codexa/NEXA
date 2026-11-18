@@ -93,7 +93,7 @@ Tests use a temporary Postgres database and the `fake` model. No API keys or Liv
 
 ## Deploying
 
-`docker-compose.yml` has no dev defaults. It requires `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `CORS_ORIGINS`, and the LiveKit credentials:
+`docker-compose.yml` has no dev defaults. It requires `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `CORS_ORIGINS`, `TRUSTED_PROXY_HOSTS`, and the LiveKit credentials. `TRUSTED_PROXY_HOSTS` is the proxy address as seen from inside the container, usually the Docker bridge gateway for a host proxy. Without it, all clients share one rate-limit bucket.
 
 ```powershell
 docker compose --env-file .env.production up --build

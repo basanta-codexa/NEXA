@@ -5,6 +5,7 @@
 #   POSTGRES_PASSWORD       Strong PostgreSQL password
 #   JWT_SECRET_KEY          Strong random JWT secret
 #   CORS_ORIGINS            Comma-separated production origins (never "*")
+#   TRUSTED_PROXY_HOSTS     Reverse proxy address as seen from inside the container
 #   LIVEKIT_URL             Production LiveKit WebSocket URL
 #   LIVEKIT_API_KEY         Production LiveKit API key
 #   LIVEKIT_API_SECRET      Production LiveKit API secret
@@ -48,6 +49,9 @@ services:
       JWT_ALGORITHM: "${JWT_ALGORITHM:-HS256}"
       JWT_ACCESS_TOKEN_EXPIRE_MINUTES: "${JWT_ACCESS_TOKEN_EXPIRE_MINUTES:-30}"
       CORS_ORIGINS: "${CORS_ORIGINS:?CORS_ORIGINS must be set to production origins}"
+      # IP/CIDR of the reverse proxy as seen from inside the container.
+      # For a host proxy this is usually the Docker bridge gateway.
+      TRUSTED_PROXY_HOSTS: "${TRUSTED_PROXY_HOSTS:?TRUSTED_PROXY_HOSTS must be set to the proxy IP or CIDR}"
       LOG_LEVEL: "${LOG_LEVEL:-INFO}"
       LIVEKIT_URL: "${LIVEKIT_URL:?LIVEKIT_URL must be set}"
       LIVEKIT_API_KEY: "${LIVEKIT_API_KEY:?LIVEKIT_API_KEY must be set}"
