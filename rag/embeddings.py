@@ -1,5 +1,6 @@
 import hashlib
 import math
+import os
 import re
 from abc import ABC, abstractmethod
 
@@ -146,9 +147,9 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
     Zero-cost local embeddings powered by local Ollama instance
     (e.g., nomic-embed-text or all-minilm).
     """
-    def __init__(self, model_name: str = "nomic-embed-text", host: str = "http://localhost:11434"):
+    def __init__(self, model_name: str = "nomic-embed-text", host: str = ""):
         self.model_name = model_name
-        self.host = host
+        self.host = host or os.getenv("OLLAMA_HOST") or "http://localhost:11434"
 
     def embed(self, text: str) -> list[float]:
         try:
@@ -190,10 +191,18 @@ class OllamaEmbeddingClient(BaseEmbeddingClient):
         return [self.embed(text) for text in texts]
 
 
-def create_embedding_client(provider_or_model: str = "auto") -> BaseEmbeddingClient:
-    if provider_or_model.startswith("ollama:"):
-        model = provider_or_model.split(":", 1)[1]
-        return OllamaEmbeddingClient(model_name=model)
-    elif provider_or_model == "ollama":
+def create_embedding_client(provider_or_model: str | None = None) -> BaseEmbeddingClient:
+    choice = (provider_or_model or os.getenv("EMBEDDING_PROVIDER", "auto")).strip().lower()
+
+    if choice.startswith("ollama:"):
+        return OllamaEmbeddingClient(model_name=choice.split(":", 1)[1])
+    if choice == "ollama":
         return OllamaEmbeddingClient()
+    if choice in {"deterministic", "none"}:
+        return DeterministicEmbeddingClient()
+    if choice == "auto":
+        # A configured Ollama host means the free local model is available.
+        if os.getenv("OLLAMA_HOST"):
+            return OllamaEmbeddingClient()
+        return DeterministicEmbeddingClient()
     return DeterministicEmbeddingClient()

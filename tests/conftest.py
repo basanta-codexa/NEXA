@@ -34,6 +34,7 @@ os.environ["DB_MAX_OVERFLOW"] = "0"
 # Rate limits stay OFF for the existing suite — it exercises login hundreds of
 # times per run. tests/test_security.py covers the limited behavior explicitly.
 os.environ["RATE_LIMIT_ENABLED"] = "false"
+os.environ["EMBEDDING_PROVIDER"] = "deterministic"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ.setdefault("LIVEKIT_API_KEY", "test-key")
 os.environ.setdefault("LIVEKIT_API_SECRET", "test-secret")
