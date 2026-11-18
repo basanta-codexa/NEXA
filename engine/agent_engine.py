@@ -2,6 +2,7 @@ import json
 import logging
 import time
 import uuid
+from collections.abc import Iterator
 from typing import Any
 
 from schemas import AgentConfig
@@ -33,6 +34,19 @@ def _serialize(value: Any) -> str:
         return json.dumps(value, default=str)
     except (TypeError, ValueError):
         return str(value)
+
+
+def _accumulate_usage(total: dict[str, int], delta: dict[str, int]) -> None:
+    """Add one provider response's token counts to the running run total.
+
+    A tool-calling run makes several LLM calls. Replacing ``total`` with each
+    response's usage dict would report only the final call, drastically
+    undercounting tokens spent by the run.
+    """
+    for key, value in delta.items():
+        if isinstance(value, bool) or not isinstance(value, int):
+            continue
+        total[key] = total.get(key, 0) + value
 
 
 class AgentEngine:
@@ -100,12 +114,10 @@ class AgentEngine:
         started_at = time.perf_counter()
 
         for iteration in range(1, iterations + 1):
-            llm_started_at = time.perf_counter()
             response = self.llm_client.chat(messages=messages, tools=tool_schemas)
-            llm_duration_ms = round((time.perf_counter() - llm_started_at) * 1000, 2)
 
             if response.get("usage"):
-                usage = response["usage"]
+                _accumulate_usage(usage, response["usage"])
 
             tool_calls = response.get("tool_calls") or []
 
@@ -197,4 +209,119 @@ class AgentEngine:
             "usage": usage,
             "duration_ms": total_duration_ms,
             "configuration": self.config,
+        }
+
+    def run_stream(
+        self,
+        user_message: str,
+        conversation_history: list[dict[str, Any]] | None = None,
+        max_iterations: int | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Run the agent loop, yielding events as soon as they are available.
+
+        Events:
+            {"type": "text",  "content": str}   - a text delta from the model
+            {"type": "tool",  "step": dict}     - a tool call completed
+            {"type": "done",  "result": dict}   - final result (same shape as run())
+        """
+        iterations = max(1, max_iterations or self.max_iterations)
+
+        messages: list[dict[str, Any]] = []
+        if self.config.system_prompt:
+            messages.append({
+                "role": "system",
+                "content": self.config.system_prompt,
+            })
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": user_message})
+
+        tool_schemas = self.tool_registry.get_tool_schemas() if self.tool_registry else []
+        steps: list[dict[str, Any]] = []
+        usage: dict[str, int] = {}
+        started_at = time.perf_counter()
+
+        for iteration in range(1, iterations + 1):
+            text_parts: list[str] = []
+            tool_calls: list[dict[str, Any]] = []
+
+            for chunk in self.llm_client.chat_stream(messages=messages, tools=tool_schemas):
+                if chunk.get("content"):
+                    text_parts.append(chunk["content"])
+                    yield {"type": "text", "content": chunk["content"]}
+                if chunk.get("tool_calls"):
+                    tool_calls.extend(chunk["tool_calls"])
+                if chunk.get("usage"):
+                    _accumulate_usage(usage, chunk["usage"])
+
+            if not tool_calls:
+                yield {
+                    "type": "done",
+                    "result": {
+                        "message": user_message,
+                        "response": "".join(text_parts),
+                        "steps": steps,
+                        "iterations": iteration,
+                        "model": self.config.model_name,
+                        "usage": usage,
+                        "duration_ms": round(
+                            (time.perf_counter() - started_at) * 1000, 2
+                        ),
+                        "configuration": self.config,
+                    },
+                }
+                return
+
+            messages.append({
+                "role": "assistant",
+                "content": "".join(text_parts),
+                "tool_calls": tool_calls,
+            })
+
+            for call in tool_calls:
+                call_id = call.get("id") or f"call_{uuid.uuid4().hex[:12]}"
+                tool_name = call.get("name")
+                arguments = _parse_tool_arguments(call.get("arguments"))
+
+                tool_started_at = time.perf_counter()
+                if not tool_name or tool_name not in self.tool_registry.list_tools():
+                    tool_result: Any = {"error": f"Tool '{tool_name}' is not registered."}
+                else:
+                    try:
+                        tool_result = self.tool_registry.execute(tool_name, **arguments)
+                    except Exception:
+                        logger.exception("Tool %s crashed", tool_name)
+                        tool_result = {"error": f"Tool '{tool_name}' failed."}
+
+                step = {
+                    "tool": tool_name,
+                    "tool_call_id": call_id,
+                    "arguments": arguments,
+                    "result": tool_result,
+                    "duration_ms": round(
+                        (time.perf_counter() - tool_started_at) * 1000, 2
+                    ),
+                }
+                steps.append(step)
+                yield {"type": "tool", "step": step}
+
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call_id,
+                    "tool_name": tool_name,
+                    "content": _serialize(tool_result),
+                })
+
+        yield {
+            "type": "done",
+            "result": {
+                "message": user_message,
+                "response": "Agent reached the maximum number of tool iterations without finishing.",
+                "steps": steps,
+                "iterations": iterations,
+                "model": self.config.model_name,
+                "usage": usage,
+                "duration_ms": round((time.perf_counter() - started_at) * 1000, 2),
+                "configuration": self.config,
+            },
         }

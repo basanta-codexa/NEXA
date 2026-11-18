@@ -50,6 +50,58 @@ def test_engine_executes_an_autonomous_tool_loop():
     assert result["steps"][0]["result"] == {"order_id": 101, "status": "Shipped"}
 
 
+class _UsageReportingLLMClient:
+    """Stub that reports distinct token usage on each call of a tool loop."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def chat(self, messages, tools=None):
+        self.calls += 1
+        if self.calls == 1:
+            return {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_1",
+                        "name": "get_order_status",
+                        "arguments": {"order_id": 101},
+                    }
+                ],
+                "usage": {"input_tokens": 100, "output_tokens": 20},
+            }
+        return {
+            "role": "assistant",
+            "content": "Order 101 has been Shipped.",
+            "tool_calls": [],
+            "usage": {"input_tokens": 150, "output_tokens": 30},
+        }
+
+
+def test_usage_is_accumulated_across_all_llm_calls():
+    client = _UsageReportingLLMClient()
+    engine = AgentEngine(
+        config=AgentConfig(model_name="stub"),
+        llm_client=client,
+        tool_registry=default_registry,
+    )
+
+    result = engine.run("What is the status of order 101?")
+
+    assert client.calls == 2
+    assert result["usage"] == {"input_tokens": 250, "output_tokens": 50}
+
+
+def test_usage_accumulation_tolerates_missing_and_non_numeric_counts():
+    from engine.agent_engine import _accumulate_usage
+
+    total: dict[str, int] = {}
+    _accumulate_usage(total, {"input_tokens": 10, "output_tokens": None, "cached": True})
+    _accumulate_usage(total, {"input_tokens": 5, "output_tokens": 7})
+    assert total == {"input_tokens": 15, "output_tokens": 7}
+
+
 def test_unknown_tool_is_reported_not_executed():
     engine = AgentEngine(
         config=AgentConfig(model_name="fake"),
