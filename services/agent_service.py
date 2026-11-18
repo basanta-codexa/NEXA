@@ -1,21 +1,23 @@
 import logging
 import os
 import uuid
+from collections.abc import Iterator
+from dataclasses import dataclass
 
-from models import Agent, AgentStatus
 from engine.agent_engine import AgentEngine
+from llm.factory import create_llm_client
+from models import Agent, AgentStatus
 from schemas import AgentConfig
-from tools.default_registry import default_registry
 from services.memory_service import (
-    get_or_create_conversation,
     add_message,
     get_conversation_history,
+    get_or_create_conversation,
 )
 from services.rag_service import (
-    search_knowledge_service,
     build_grounded_context,
+    search_knowledge_service,
 )
-from llm.factory import create_llm_client
+from tools.default_registry import default_registry
 
 logger = logging.getLogger(__name__)
 
@@ -142,14 +144,29 @@ def delete_agent_service(db, agent_id, tenant_id):
     return agent
 
 
-def run_agent_engine_service(
+@dataclass
+class _AgentRunSetup:
+    engine: AgentEngine
+    conversation: object
+    conversation_history: list[dict]
+    retrieved_chunks: list[dict]
+    session_id: str
+
+
+def _prepare_agent_run(
     db,
     agent_id,
     tenant_id,
     user_message,
     session_id: str | None = None,
     user_id: int | None = None,
-):
+    voice_mode: bool = False,
+) -> _AgentRunSetup | dict:
+    """Validate, retrieve context, and persist the user turn for a run.
+
+    Shared by the blocking and streaming paths so both behave identically up
+    to the point where the LLM is called.
+    """
     agent = get_agent_service(db, agent_id, tenant_id)
 
     if agent is None:
@@ -178,7 +195,12 @@ def run_agent_engine_service(
         threshold=threshold,
     )
 
-    effective_system_prompt = agent.system_prompt or ""
+    if voice_mode:
+        from voice.prompts import build_voice_system_prompt
+
+        effective_system_prompt = build_voice_system_prompt(agent)
+    else:
+        effective_system_prompt = agent.system_prompt or ""
     if retrieved_chunks:
         grounding_context = build_grounded_context(retrieved_chunks)
         effective_system_prompt = f"{effective_system_prompt}\n\n{grounding_context}".strip()
@@ -234,10 +256,47 @@ def run_agent_engine_service(
         content=user_message,
     )
 
+    return _AgentRunSetup(
+        engine=engine,
+        conversation=conversation,
+        conversation_history=conversation_history,
+        retrieved_chunks=retrieved_chunks,
+        session_id=session_id,
+    )
+
+
+def run_agent_engine_service(
+    db,
+    agent_id,
+    tenant_id,
+    user_message,
+    session_id: str | None = None,
+    user_id: int | None = None,
+    voice_mode: bool = False,
+):
+    setup = _prepare_agent_run(
+        db,
+        agent_id,
+        tenant_id,
+        user_message,
+        session_id=session_id,
+        user_id=user_id,
+        voice_mode=voice_mode,
+    )
+    if setup is None:
+        return None
+    if isinstance(setup, dict):
+        return setup
+
+    engine = setup.engine
+    conversation = setup.conversation
+    retrieved_chunks = setup.retrieved_chunks
+    session_id = setup.session_id
+
     try:
         result = engine.run(
             user_message=user_message,
-            conversation_history=conversation_history,
+            conversation_history=setup.conversation_history,
         )
     except RuntimeError as exc:
         logger.warning(
@@ -270,3 +329,65 @@ def run_agent_engine_service(
     )
 
     return result
+
+
+def stream_agent_engine_service(
+    db,
+    agent_id,
+    tenant_id,
+    user_message,
+    session_id: str | None = None,
+    user_id: int | None = None,
+    voice_mode: bool = False,
+) -> Iterator[dict]:
+    """Yield text deltas as they are generated, then one final 'done' event.
+
+    Mirrors run_agent_engine_service but uses AgentEngine.run_stream so
+    callers (voice) can act on the first token instead of the whole answer.
+    """
+    setup = _prepare_agent_run(
+        db,
+        agent_id,
+        tenant_id,
+        user_message,
+        session_id=session_id,
+        user_id=user_id,
+        voice_mode=voice_mode,
+    )
+    if setup is None:
+        yield {"type": "error", "error": "Agent not found"}
+        return
+    if isinstance(setup, dict):
+        yield {"type": "error", **setup}
+        return
+
+    try:
+        for event in setup.engine.run_stream(
+            user_message=user_message,
+            conversation_history=setup.conversation_history,
+        ):
+            if event["type"] != "done":
+                yield event
+                continue
+
+            result = event["result"]
+            add_message(
+                db=db,
+                conversation_id=setup.conversation.id,
+                tenant_id=tenant_id,
+                role="assistant",
+                content=result.get("response", ""),
+            )
+            result["session_id"] = setup.session_id
+            result["agent_id"] = agent_id
+            if setup.retrieved_chunks:
+                result["citations"] = setup.retrieved_chunks
+            yield {"type": "done", "result": result}
+    except RuntimeError as exc:
+        logger.warning(
+            "agent_stream_failed agent_id=%s tenant_id=%s error=%s",
+            agent_id,
+            tenant_id,
+            exc,
+        )
+        yield {"type": "error", "error": str(exc), "status_code": 502}
