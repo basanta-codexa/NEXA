@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from collections.abc import Iterator
 from typing import Any
 
 import requests
@@ -121,10 +122,10 @@ class OllamaClient(LLMClient):
     ) -> dict[str, Any]:
         return self.chat(messages=messages, tools=tool_schemas)
 
-    def chat(
+    def _build_payload(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model_name,
@@ -141,6 +142,15 @@ class OllamaClient(LLMClient):
             payload["options"] = options
         if tools:
             payload["tools"] = tools
+
+        return payload
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        payload = self._build_payload(messages, tools)
 
         try:
             response = requests.post(
@@ -198,3 +208,77 @@ class OllamaClient(LLMClient):
             }
 
         return result
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        payload = self._build_payload(messages, tools)
+        payload["stream"] = True
+
+        try:
+            with requests.post(
+                f"{self.host}/api/chat",
+                json=payload,
+                timeout=self.timeout,
+                stream=True,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    raw_message = data.get("message", {})
+
+                    if raw_message.get("content"):
+                        yield {"content": raw_message["content"]}
+
+                    calls = raw_message.get("tool_calls") or []
+                    if calls:
+                        parsed = []
+                        for index, call in enumerate(calls):
+                            function_data = call.get("function", {})
+                            arguments = function_data.get("arguments", {})
+                            if isinstance(arguments, str):
+                                try:
+                                    arguments = json.loads(arguments)
+                                except ValueError:
+                                    arguments = {}
+                            if not isinstance(arguments, dict):
+                                arguments = {"value": arguments}
+                            parsed.append(
+                                {
+                                    "id": call.get("id") or f"call_ollama_{index}",
+                                    "name": function_data.get("name"),
+                                    "arguments": arguments,
+                                }
+                            )
+                        yield {"tool_calls": parsed}
+
+                    if (
+                        data.get("prompt_eval_count") is not None
+                        or data.get("eval_count") is not None
+                    ):
+                        yield {
+                            "usage": {
+                                "input_tokens": data.get("prompt_eval_count", 0),
+                                "output_tokens": data.get("eval_count", 0),
+                            }
+                        }
+
+                    if data.get("done"):
+                        break
+
+        except requests.exceptions.Timeout as exc:
+            raise RuntimeError("Ollama request timed out.") from exc
+        except requests.exceptions.ConnectionError as exc:
+            raise RuntimeError(
+                f"Unable to connect to Ollama at {self.host}. Is it running?"
+            ) from exc
+        except requests.exceptions.HTTPError as exc:
+            raise RuntimeError(
+                f"Ollama model '{self.model_name}' is unavailable: {exc}"
+            ) from exc
+        except requests.exceptions.RequestException as exc:
+            raise RuntimeError(f"Ollama request failed: {exc}") from exc

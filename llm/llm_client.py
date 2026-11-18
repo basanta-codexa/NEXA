@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -59,3 +60,26 @@ class LLMClient(ABC):
         }
         """
         pass
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        """Yield normalized stream chunks as they arrive.
+
+        Chunks may contain any of:
+            {"content": "text delta"}
+            {"tool_calls": [{"id", "name", "arguments"}]}
+            {"usage": {"input_tokens": int, "output_tokens": int}}
+
+        The default implementation falls back to a single non-streaming call,
+        so clients that do not override this keep working.
+        """
+        result = self.chat(messages=messages, tools=tools)
+        chunk: dict[str, Any] = {"content": result.get("content", "")}
+        if result.get("tool_calls"):
+            chunk["tool_calls"] = result["tool_calls"]
+        if result.get("usage"):
+            chunk["usage"] = result["usage"]
+        yield chunk

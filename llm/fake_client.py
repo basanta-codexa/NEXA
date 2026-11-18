@@ -1,3 +1,4 @@
+from collections.abc import Iterator
 from typing import Any
 
 from llm.llm_client import LLMClient
@@ -66,3 +67,19 @@ class FakeLLMClient(LLMClient):
             "content": content,
             "tool_calls": [],
         }
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        result = self.chat(messages=messages, tools=tools)
+
+        if result.get("tool_calls"):
+            yield {"tool_calls": result["tool_calls"]}
+
+        content = result.get("content", "")
+        words = content.split(" ")
+        for index, word in enumerate(words):
+            if word:
+                yield {"content": word + (" " if index < len(words) - 1 else "")}

@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from collections.abc import Iterator
 from typing import Any
 
 from dotenv import load_dotenv
@@ -170,10 +171,10 @@ class OpenAIClient(LLMClient):
         ])
         return response["content"]
 
-    def chat(
+    def _build_payload(
         self,
         messages: list[dict[str, Any]],
-        tools: list[dict[str, Any]] | None = None
+        tools: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self.model_name,
@@ -190,6 +191,15 @@ class OpenAIClient(LLMClient):
             payload["top_p"] = self.top_p
         if self.max_tokens is not None:
             payload["max_completion_tokens"] = self.max_tokens
+
+        return payload
+
+    def chat(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None
+    ) -> dict[str, Any]:
+        payload = self._build_payload(messages, tools)
 
         try:
             completion = self.client.chat.completions.create(**payload)
@@ -216,3 +226,85 @@ class OpenAIClient(LLMClient):
             }
 
         return result
+
+    def chat_stream(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]] | None = None,
+    ) -> Iterator[dict[str, Any]]:
+        payload = self._build_payload(messages, tools)
+
+        try:
+            stream = self.client.chat.completions.create(**payload, stream=True)
+        except RuntimeError:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "%s streaming request failed for model %s",
+                self._provider_name,
+                self.model_name,
+            )
+            raise RuntimeError(
+                f"{self._provider_name} streaming request failed: {exc}"
+            ) from exc
+
+        # OpenAI emits tool calls as indexed deltas with partial JSON arguments.
+        pending_calls: dict[int, dict[str, Any]] = {}
+        try:
+            for chunk in stream:
+                if not getattr(chunk, "choices", None):
+                    continue
+                choice = chunk.choices[0]
+                delta = choice.delta
+
+                if getattr(delta, "content", None):
+                    yield {"content": delta.content}
+
+                for call_delta in getattr(delta, "tool_calls", None) or []:
+                    entry = pending_calls.setdefault(
+                        call_delta.index,
+                        {"id": None, "name": "", "arguments": ""},
+                    )
+                    if getattr(call_delta, "id", None):
+                        entry["id"] = call_delta.id
+                    function = getattr(call_delta, "function", None)
+                    if function is not None:
+                        if getattr(function, "name", None):
+                            entry["name"] += function.name
+                        if getattr(function, "arguments", None):
+                            entry["arguments"] += function.arguments
+
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    yield {
+                        "usage": {
+                            "input_tokens": getattr(usage, "prompt_tokens", 0),
+                            "output_tokens": getattr(usage, "completion_tokens", 0),
+                        }
+                    }
+
+                if choice.finish_reason == "tool_calls" and pending_calls:
+                    calls = []
+                    for entry in pending_calls.values():
+                        try:
+                            arguments = (
+                                json.loads(entry["arguments"])
+                                if entry["arguments"]
+                                else {}
+                            )
+                        except ValueError:
+                            arguments = {}
+                        if not isinstance(arguments, dict):
+                            arguments = {"value": arguments}
+                        calls.append(
+                            {
+                                "id": entry["id"],
+                                "name": entry["name"],
+                                "arguments": arguments,
+                            }
+                        )
+                    yield {"tool_calls": calls}
+        finally:
+            close = getattr(stream, "close", None)
+            if close is not None:
+                close()
